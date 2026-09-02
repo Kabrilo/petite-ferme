@@ -1790,6 +1790,7 @@ if (!window.overlay) {
   let fbUser = null;
   let lastSyncAt = 0;
   let cloudBusy = false;
+  let cloudDirty = false;   // une synchro a été demandée pendant qu'une autre tournait
 
   // --- Accès Firestore via l'API REST (pas de SDK Firestore) ---
   const FS_URL = FIREBASE_CONFIG
@@ -1814,7 +1815,10 @@ if (!window.overlay) {
   }
 
   async function cloudUpload() {
-    if (!fbUser || cloudBusy) return;
+    if (!fbUser) return;
+    // Une synchro déjà en vol : on note qu'il faudra en refaire une avec
+    // l'état le plus récent, sinon la dernière progression serait perdue.
+    if (cloudBusy) { cloudDirty = true; return; }
     cloudBusy = true;
     try {
       await fsRequest('PATCH', {
@@ -1828,6 +1832,7 @@ if (!window.overlay) {
       lastSyncAt = Date.now();
     } catch (e) { /* hors-ligne : re-tentera au prochain cycle */ }
     cloudBusy = false;
+    if (cloudDirty) { cloudDirty = false; await cloudUpload(); }
   }
 
   // explicitLogin=true : le cloud gagne (c'est « ma ferme de compte »).
@@ -1897,11 +1902,12 @@ if (!window.overlay) {
       firstAuth = false;
       if (openPanel && openPanel.type === 'reglages') { htmlCache.panel = null; render(); }
     });
-    // Synchro automatique : toutes les 45 s + quand on quitte/masque la page
-    setInterval(() => { if (fbUser) cloudUpload(); }, 45000);
+    // Synchro automatique : régulièrement + dès qu'on quitte ou masque la page
+    setInterval(() => { if (fbUser) cloudUpload(); }, 20000);
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden' && fbUser) cloudUpload();
     });
+    window.addEventListener('pagehide', () => { if (fbUser) cloudUpload(); });
   }
 
   function accountSection() {
