@@ -343,16 +343,28 @@ body.mobile { --fs: 14px; height: 100dvh; touch-action: manipulation; -webkit-ta
   </nav>
 <script>
 
+// Le jeu écrit toujours sous la même clé ; on la redirige vers une clé propre
+// au compte connecté. Chaque compte a donc SA sauvegarde, et la partie jouée
+// sans compte reste séparée.
 const localStorage = (() => {
-  try { window.localStorage.getItem('__t'); return window.localStorage; }
+  const SAVE = 'petite-ferme-save-v1';
+  let real;
+  try { window.localStorage.getItem('__t'); real = window.localStorage; }
   catch (e) {
     const m = {};
-    return {
+    real = {
       getItem: (k) => (k in m ? m[k] : null),
       setItem: (k, v) => { m[k] = String(v); },
       removeItem: (k) => { delete m[k]; }
     };
   }
+  const map = (k) => (k === SAVE && window.__saveUid) ? SAVE + '-' + window.__saveUid : k;
+  return {
+    getItem: (k) => real.getItem(map(k)),
+    setItem: (k, v) => real.setItem(map(k), v),
+    removeItem: (k) => real.removeItem(map(k)),
+    raw: real
+  };
 })();
 
 // ============================================================
@@ -1828,7 +1840,8 @@ if (!window.overlay) {
     ]);
   }
   let lastSig = null;
-  let cloudScoreKnown = -1;   // progression connue du compte : garde-fou anti-ecrasement
+  let cloudScoreKnown = -1;
+  const SAVE_CACHE_PREFIX = 'petite-ferme-save-v1-';   // progression connue du compte : garde-fou anti-ecrasement
 
   async function cloudUpload(force, allowRegression) {
     if (!fbUser) return;
@@ -1900,75 +1913,38 @@ if (!window.overlay) {
     try { return JSON.parse(localStorage.getItem('petite-ferme-backup')); } catch (e) { return null; }
   }
 
-  // Conflit : les deux fermes ont progressé chacune de leur côté. On ne tranche
-  // pas à la place du joueur.
-  function askFarmConflict(cloudJson) {
-    let cloudG = null;
-    try { cloudG = JSON.parse(cloudJson); } catch (e) { return; }
-    const wrap = document.createElement('div');
-    wrap.className = 'save-modal';
-    wrap.innerHTML = `<div class="box">
-      <b>⚠️ Deux fermes différentes</b>
-      <span class="sub">Votre compte et cet appareil ont chacun une ferme. Laquelle gardez-vous ? L'autre reste récupérable dans les Réglages.</span>
-      <div class="account-box"><b>☁️ Ferme du compte</b><span class="sub">${describeFarm(cloudG)}</span>
-        <button data-m="cloud">Garder celle-ci</button></div>
-      <div class="account-box"><b>📱 Ferme de cet appareil</b><span class="sub">${describeFarm(G)}</span>
-        <button data-m="local">Garder celle-ci</button></div>
-    </div>`;
-    wrap.addEventListener('click', async (e) => {
-      const b = e.target.closest('[data-m]');
-      if (!b) return;
-      if (b.dataset.m === 'cloud') {
-        backupSave(exportSave(), 'ferme de cet appareil, remplacée par celle du compte');
-        importSave(cloudJson);
-        lastSig = farmSignature();
-        toast('☁️ Ferme du compte chargée.');
-      } else {
-        backupSave(cloudJson, 'ferme du compte, remplacée par celle de cet appareil');
-        await cloudUpload(true, true);
-        toast('📱 Ferme de cet appareil conservée et envoyée sur le compte.');
-      }
-      wrap.remove();
-      if (openPanel) { htmlCache.panel = null; render(); }
-    });
-    document.querySelector('#farm-view').appendChild(wrap);
-  }
-
-  // Règle : la ferme la PLUS AVANCÉE gagne. Si c'est celle de l'appareil alors
-  // que le joueur vient de se connecter, on lui demande avant de rien écraser.
-  async function cloudRestore(explicitLogin) {
+  // La ferme du COMPTE fait autorité : dès qu'on est connecté, c'est elle
+  // qui est chargée. Plus de comparaison entre appareils, donc plus d'écrasement.
+  async function cloudRestore() {
     if (!fbUser) return;
+    const uidKey = SAVE_CACHE_PREFIX + fbUser.uid;
+    window.__saveUid = fbUser.uid;   // le jeu sauvegarde désormais sous ce compte
     try {
       const doc = await fsRequest('GET');
       if (doc && doc.fields && doc.fields.json) {
-        const cloudJson = doc.fields.json.stringValue;
-        let cloudG = null;
-        try { cloudG = JSON.parse(cloudJson); } catch (e) { cloudG = null; }
-        if (!cloudG) { await cloudUpload(true); lastSyncAt = Date.now(); return; }
-
-        const sCloud = progressScore(cloudG);
-        cloudScoreKnown = sCloud;
-        const sLocal = progressScore(G);
-        const localFresh = G.stats.earned === 0 && G.stats.harvested === 0 && G.day === 0;
-
-        if (localFresh || sCloud > sLocal) {
-          if (!localFresh) backupSave(exportSave(), 'ferme de cet appareil, remplacée par celle du compte');
-          importSave(cloudJson);
-          lastSig = farmSignature();
-          toast('☁️ Ferme du compte chargée !');
-        } else if (sLocal > sCloud && explicitLogin) {
-          askFarmConflict(cloudJson);      // le joueur tranche
-        } else {
-          await cloudUpload(true);         // même appareil qui continue de jouer
-        }
+        importSave(doc.fields.json.stringValue);
+        lastSig = farmSignature();
+        cloudScoreKnown = -1;
+        toast('☁️ Ferme du compte chargée.');
       } else {
-        await cloudUpload(true);
-        toast('☁️ Votre ferme est maintenant sauvegardée sur votre compte !');
+        // compte tout neuf : la ferme en cours devient celle du compte
+        await cloudUpload(true, true);
+        toast('☁️ Votre ferme est maintenant liée à votre compte.');
       }
       lastSyncAt = Date.now();
-    } catch (e) { toast('☁️ Synchronisation impossible pour le moment.'); }
+    } catch (e) {
+      // Hors connexion : on reprend la dernière ferme connue DE CE COMPTE,
+      // jamais celle d'un autre compte ni la partie sans compte.
+      let cached = null;
+      try { cached = localStorage.raw.getItem(uidKey); } catch (e2) { cached = null; }
+      if (cached) {
+        try { importSave(cached); lastSig = farmSignature(); } catch (e3) { /* cache illisible */ }
+        toast('📴 Hors connexion : dernière ferme connue de ce compte.');
+      } else {
+        toast('📴 Connexion au compte impossible pour le moment.');
+      }
+    }
   }
-
   const FB_ERRORS = {
     'auth/email-already-in-use': '❌ Ce pseudo est déjà pris.',
     'auth/invalid-credential': '❌ Pseudo ou mot de passe incorrect.',
@@ -2006,8 +1982,7 @@ if (!window.overlay) {
       const wasLoggedOut = !fbUser;
       fbUser = u;
       if (u) {
-        // premier événement après chargement = session restaurée ; sinon = login explicite
-        await cloudRestore(!firstAuth && wasLoggedOut);
+        await cloudRestore();   // le compte fait autorité, quel que soit le contexte
       }
       firstAuth = false;
       if (openPanel && openPanel.type === 'reglages') { htmlCache.panel = null; render(); }
@@ -2137,7 +2112,10 @@ if (!window.overlay) {
     else if (act === 'acc-login') accountAction('login');
     else if (act === 'acc-logout') {
       cloudUpload(true).finally(() => firebase.auth().signOut().then(() => {
-        toast('👋 Déconnecté. La ferme reste sauvegardée sur cet appareil et sur le compte.');
+        window.__saveUid = null;   // retour à la partie hors compte
+        const solo = localStorage.getItem('petite-ferme-save-v1');
+        if (solo) { try { importSave(solo); } catch (e) { resetGame(); } } else { resetGame(); }
+        toast('👋 Déconnecté. Votre ferme de compte est en sécurité, reconnectez-vous pour la retrouver.');
         if (openPanel) { htmlCache.panel = null; render(); }
       }));
     }
