@@ -1,0 +1,1853 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>Petite Ferme</title>
+  <meta name="description" content="Petit jeu de ferme à garder dans un coin d'écran — plantez, élevez, produisez, vendez. La ferme vit même quand le jeu est fermé.">
+  <meta name="theme-color" content="#1b2a1e">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Petite Ferme">
+  <style>
+/* ============================================================
+   Petite Ferme — style compact pour fenêtre overlay
+   ============================================================ */
+* { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
+
+:root {
+  --bg: #141d16;
+  --bg2: #1b2a1e;
+  --bg3: #24352a;
+  --soil: #4a3524;
+  --soil-wet: #3a2a1c;
+  --accent: #7ec850;
+  --gold: #f4c542;
+  --text: #e8f0e4;
+  --muted: #93a68f;
+  --danger: #e07a5f;
+  --radius: 8px;
+  --fs: 13px;
+}
+body.compact { --fs: 11px; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: var(--fs);
+}
+body { display: flex; flex-direction: column; }
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: var(--bg3);
+  border: 1px solid #3a4d3e;
+  border-radius: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+button:hover { background: #2e4433; }
+button:disabled { opacity: 0.45; cursor: default; }
+
+/* --- Barre de titre --- */
+#titlebar {
+  -webkit-app-region: drag;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: linear-gradient(#223526, #1b2a1e);
+  border-bottom: 1px solid #32463a;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  overflow: hidden;
+}
+#titlebar .tb-title { font-weight: 600; }
+#titlebar .tb-info { display: flex; gap: 10px; flex: 1; overflow: hidden; color: var(--muted); }
+#tb-money { color: var(--gold); font-weight: 600; }
+.tb-buttons { -webkit-app-region: no-drag; display: flex; gap: 4px; }
+.tb-buttons button {
+  width: 24px; height: 22px; padding: 0;
+  background: transparent; border: none; border-radius: 4px;
+  font-size: 12px; line-height: 1;
+}
+.tb-buttons button:hover { background: #34503a; }
+#btn-close:hover { background: #7a3030; }
+#btn-pin.off { opacity: 0.35; }
+body.compact .tb-name { display: none; }
+
+/* --- Vue ferme --- */
+#farm-view { flex: 1; position: relative; overflow: hidden; display: flex; }
+#farm-scroll { flex: 1; overflow-y: auto; padding: 8px; }
+#farm-scroll::-webkit-scrollbar { width: 6px; }
+#farm-scroll::-webkit-scrollbar-thumb { background: #3a4d3e; border-radius: 3px; }
+
+.farm-section { margin-bottom: 8px; }
+.section-head {
+  display: flex; align-items: center; gap: 6px;
+  color: var(--muted); font-size: 0.85em;
+  margin: 2px 0 4px;
+}
+.section-head .spacer { flex: 1; }
+.section-head button { padding: 1px 7px; font-size: 0.95em; }
+
+/* Parcelles */
+#plots-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  gap: 5px;
+}
+body.compact #plots-grid { grid-template-columns: repeat(auto-fill, minmax(42px, 1fr)); }
+.plot {
+  position: relative;
+  aspect-ratio: 1;
+  background: var(--soil);
+  border: 1px solid #5d452f;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.7em;
+  cursor: pointer;
+  transition: transform 0.08s;
+}
+.plot:hover { transform: scale(1.05); }
+.plot.watered { background: var(--soil-wet); border-color: #6b563f; }
+.plot.ready { box-shadow: 0 0 6px 1px rgba(244, 197, 66, 0.55); animation: pulse 1.6s infinite; }
+.plot.buy-plot { background: var(--bg3); border: 1px dashed #4a5d4e; font-size: 0.75em; flex-direction: column; color: var(--muted); }
+@keyframes pulse { 50% { box-shadow: 0 0 10px 2px rgba(244, 197, 66, 0.8); } }
+.plot .drop { position: absolute; top: 2px; right: 4px; font-size: 0.45em; }
+.plot .pbar {
+  position: absolute; bottom: 3px; left: 6px; right: 6px; height: 3px;
+  background: #00000055; border-radius: 2px; overflow: hidden;
+}
+.plot .pbar > i { display: block; height: 100%; background: var(--accent); }
+.plot .timer {
+  position: absolute; bottom: 7px; left: 0; right: 0;
+  text-align: center; font-size: 0.38em; color: #ffffffcc;
+  text-shadow: 0 1px 2px #000;
+}
+
+/* Animaux & bâtiments (bandeaux) */
+.strip { display: flex; flex-wrap: wrap; gap: 5px; }
+.critter, .bldg {
+  position: relative;
+  min-width: 52px; height: 52px;
+  background: var(--bg2);
+  border: 1px solid #32463a;
+  border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.6em; cursor: pointer;
+}
+body.compact .critter, body.compact .bldg { min-width: 42px; height: 42px; }
+.critter:hover, .bldg:hover { background: var(--bg3); }
+.critter .stock, .bldg .stock {
+  position: absolute; top: -4px; right: -4px;
+  background: var(--gold); color: #4a3a00;
+  font-size: 0.42em; font-weight: 700;
+  min-width: 15px; height: 15px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 3px;
+}
+.critter .hungry { position: absolute; bottom: 1px; right: 3px; font-size: 0.45em; }
+.critter .pbar, .bldg .pbar {
+  position: absolute; bottom: 3px; left: 7px; right: 7px; height: 3px;
+  background: #00000055; border-radius: 2px; overflow: hidden;
+}
+.critter .pbar > i, .bldg .pbar > i { display: block; height: 100%; background: var(--accent); }
+
+/* --- Toasts --- */
+#toasts {
+  position: absolute; top: 6px; left: 8px; right: 8px;
+  display: flex; flex-direction: column; gap: 4px;
+  pointer-events: none; z-index: 30;
+}
+.toast {
+  background: #0f1811ee;
+  border: 1px solid #3a4d3e;
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 5px 9px;
+  font-size: 0.9em;
+  animation: slidein 0.2s ease-out;
+  box-shadow: 0 2px 8px #000a;
+}
+.toast.fadeout { opacity: 0; transition: opacity 0.4s; }
+@keyframes slidein { from { transform: translateY(-8px); opacity: 0; } }
+
+/* --- Panneaux --- */
+#panel-container {
+  position: absolute; inset: 0;
+  background: #0a120cbb;
+  display: flex; align-items: flex-end;
+  z-index: 20;
+}
+#panel-container.hidden { display: none; }
+#panel {
+  width: 100%;
+  max-height: 82%;
+  background: var(--bg2);
+  border-top: 1px solid #3a4d3e;
+  border-radius: 12px 12px 0 0;
+  overflow-y: auto;
+  padding: 10px;
+  box-shadow: 0 -4px 16px #000a;
+}
+#panel::-webkit-scrollbar { width: 6px; }
+#panel::-webkit-scrollbar-thumb { background: #3a4d3e; border-radius: 3px; }
+.panel-head {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 8px; font-weight: 600;
+}
+.panel-head .spacer { flex: 1; }
+.panel-close { background: transparent; border: none; font-size: 1.1em; }
+
+.row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  margin-bottom: 3px;
+  background: #00000022;
+}
+.row:hover { background: #00000038; }
+.row .ic { font-size: 1.35em; width: 26px; text-align: center; flex: 0 0 auto; }
+.row .grow { flex: 1; min-width: 0; overflow: hidden; }
+.row .name { font-weight: 600; }
+.row .sub { color: var(--muted); font-size: 0.82em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .actions { display: flex; gap: 4px; flex: 0 0 auto; }
+.row.locked { opacity: 0.5; }
+.price { color: var(--gold); font-weight: 600; }
+.up { color: var(--accent); } .down { color: var(--danger); }
+
+.tag {
+  display: inline-block; font-size: 0.75em;
+  padding: 0 5px; border-radius: 4px;
+  background: #34503a; color: var(--accent);
+}
+.tag.off { background: #503434; color: var(--danger); }
+
+/* --- Réglages --- */
+.setting-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px; }
+.setting-row .grow { flex: 1; }
+input[type="range"] { accent-color: var(--accent); width: 110px; }
+
+/* --- Barre d'onglets --- */
+#tabbar {
+  display: flex;
+  flex: 0 0 auto;
+  border-top: 1px solid #32463a;
+  background: #17231a;
+}
+#tabbar button {
+  flex: 1;
+  background: transparent; border: none; border-radius: 0;
+  padding: 6px 0;
+  font-size: 15px;
+  position: relative;
+  opacity: 0.6;
+}
+body.compact #tabbar button { padding: 4px 0; font-size: 13px; }
+#tabbar button:hover { opacity: 1; background: #22331f; }
+#tabbar button.active { opacity: 1; border-top: 2px solid var(--accent); margin-top: -1px; }
+#tabbar .badge {
+  position: absolute; top: 2px; right: 18%;
+  min-width: 13px; height: 13px;
+  background: var(--danger); color: #fff;
+  font-size: 9px; font-style: normal; font-weight: 700;
+  border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 3px;
+}
+#tabbar .badge.hidden { display: none; }
+.hidden { display: none !important; }
+
+
+/* --- Surcouche mobile / tactile --- */
+body.mobile { --fs: 14px; height: 100dvh; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.mobile .tb-buttons { display: none; }
+.mobile .tb-name { display: none; }
+.mobile #titlebar { padding: 8px 10px; -webkit-app-region: no-drag; }
+.mobile #plots-grid { grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 7px; }
+.mobile .critter, .mobile .bldg { min-width: 60px; height: 60px; }
+.mobile #tabbar button { padding: 11px 0 max(11px, env(safe-area-inset-bottom)); font-size: 20px; }
+.mobile .row .actions button { min-height: 36px; min-width: 42px; }
+.mobile button { padding: 7px 11px; }
+.mobile #panel { max-height: 78%; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+.mobile .setting-row { padding: 9px 4px; }
+.mobile input[type="range"] { width: 130px; }
+.save-modal { position: absolute; inset: 0; z-index: 50; background: #0a120cdd; display: flex; align-items: center; justify-content: center; padding: 14px; }
+.save-modal .box { background: var(--bg2); border: 1px solid #3a4d3e; border-radius: 10px; padding: 12px; width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 8px; }
+.save-modal textarea { width: 100%; height: 120px; background: #0f1811; color: var(--text); border: 1px solid #3a4d3e; border-radius: 6px; padding: 6px; font-size: 12px; user-select: text; -webkit-user-select: text; }
+.save-modal .btns { display: flex; gap: 8px; justify-content: flex-end; }
+
+  </style>
+</head>
+<body>
+<!-- Barre de titre (zone de déplacement de la fenêtre) -->
+  <header id="titlebar">
+    <span class="tb-title">🌾 <span class="tb-name">Petite Ferme</span></span>
+    <span class="tb-info">
+      <span id="tb-money" title="Argent">💰 0</span>
+      <span id="tb-rep" title="Réputation">⭐ 0</span>
+      <span id="tb-day" title="Jour / saison"></span>
+      <span id="tb-weather" title="Météo"></span>
+    </span>
+    <span class="tb-buttons">
+      <button id="btn-pin" title="Toujours au-dessus">📌</button>
+      <button id="btn-min" title="Réduire">–</button>
+      <button id="btn-close" title="Fermer">✕</button>
+    </span>
+  </header>
+
+  <!-- Vue principale : la ferme -->
+  <main id="farm-view">
+    <div id="farm-scroll">
+      <section id="plots" class="farm-section"></section>
+      <section id="animals-strip" class="farm-section"></section>
+      <section id="buildings-strip" class="farm-section"></section>
+    </div>
+    <div id="toasts"></div>
+    <div id="panel-container" class="hidden">
+      <div id="panel"></div>
+    </div>
+  </main>
+
+  <!-- Barre d'onglets -->
+  <nav id="tabbar">
+    <button data-tab="ferme" class="active" title="Ferme">🌱<i class="badge hidden"></i></button>
+    <button data-tab="animaux" title="Animaux">🐄<i class="badge hidden"></i></button>
+    <button data-tab="production" title="Production">🏭<i class="badge hidden"></i></button>
+    <button data-tab="marche" title="Marché">🛒<i class="badge hidden"></i></button>
+    <button data-tab="quetes" title="Commandes">📜<i class="badge hidden"></i></button>
+    <button data-tab="ameliorations" title="Améliorations">⬆️</button>
+    <button data-tab="reglages" title="Réglages">⚙️</button>
+  </nav>
+<script>
+
+const localStorage = (() => {
+  try { window.localStorage.getItem('__t'); return window.localStorage; }
+  catch (e) {
+    const m = {};
+    return {
+      getItem: (k) => (k in m ? m[k] : null),
+      setItem: (k, v) => { m[k] = String(v); },
+      removeItem: (k) => { delete m[k]; }
+    };
+  }
+})();
+
+// ============================================================
+// DATA — définitions statiques du jeu (cultures, animaux, etc.)
+// ============================================================
+'use strict';
+
+const DAY_MS = 10 * 60 * 1000;      // 1 jour de jeu = 10 minutes réelles
+const SEASON_DAYS = 12;             // 1 saison = 12 jours = 2 h réelles
+const MIN = 60 * 1000;
+
+const SEASONS = [
+  { id: 'printemps', name: 'Printemps', icon: '🌸' },
+  { id: 'ete',       name: 'Été',       icon: '☀️' },
+  { id: 'automne',   name: 'Automne',   icon: '🍂' },
+  { id: 'hiver',     name: 'Hiver',     icon: '❄️' }
+];
+
+// Probabilités météo par saison (les événements négatifs restent rares)
+const WEATHER_TABLE = {
+  printemps: [['soleil', 40], ['nuages', 25], ['pluie', 30], ['orage', 5]],
+  ete:       [['soleil', 60], ['nuages', 20], ['pluie', 12], ['orage', 8]],
+  automne:   [['soleil', 30], ['nuages', 35], ['pluie', 30], ['orage', 5]],
+  hiver:     [['soleil', 25], ['nuages', 30], ['neige', 40], ['pluie', 5]]
+};
+const WEATHER = {
+  soleil: { name: 'Soleil',  icon: '☀️' },
+  nuages: { name: 'Nuageux', icon: '☁️' },
+  pluie:  { name: 'Pluie',   icon: '🌧️' },  // arrose automatiquement les cultures
+  orage:  { name: 'Orage',   icon: '⛈️' },  // arrose aussi
+  neige:  { name: 'Neige',   icon: '🌨️' }   // production ralentie de 25 %
+};
+
+// --- CULTURES ---
+// growMin : minutes réelles de croissance (en étant arrosé)
+// repLvl : niveau de réputation requis pour débloquer
+const CROPS = {
+  ble:        { name: 'Blé',          icon: '🌾', seed: 10, growMin: 8,  yield: 2, sell: 12, seasons: ['printemps','ete','automne'], repLvl: 0 },
+  carotte:    { name: 'Carotte',      icon: '🥕', seed: 8,  growMin: 5,  yield: 1, sell: 15, seasons: ['printemps','automne'],       repLvl: 0 },
+  patate:     { name: 'Pomme de terre', icon: '🥔', seed: 12, growMin: 10, yield: 2, sell: 14, seasons: ['printemps'],               repLvl: 0 },
+  tomate:     { name: 'Tomate',       icon: '🍅', seed: 15, growMin: 12, yield: 3, sell: 11, seasons: ['ete'],                       repLvl: 0 },
+  mais:       { name: 'Maïs',         icon: '🌽', seed: 20, growMin: 15, yield: 2, sell: 22, seasons: ['ete'],                       repLvl: 1 },
+  fraise:     { name: 'Fraise',       icon: '🍓', seed: 25, growMin: 12, yield: 3, sell: 16, seasons: ['printemps'],                 repLvl: 1 },
+  oignon:     { name: 'Oignon',       icon: '🧅', seed: 14, growMin: 8,  yield: 2, sell: 13, seasons: ['printemps','automne'],       repLvl: 1 },
+  tournesol:  { name: 'Tournesol',    icon: '🌻', seed: 22, growMin: 14, yield: 1, sell: 40, seasons: ['ete'],                       repLvl: 2 },
+  pasteque:   { name: 'Pastèque',     icon: '🍉', seed: 28, growMin: 18, yield: 1, sell: 52, seasons: ['ete'],                       repLvl: 2 },
+  citrouille: { name: 'Citrouille',   icon: '🎃', seed: 30, growMin: 20, yield: 1, sell: 55, seasons: ['automne'],                   repLvl: 2 },
+  chou:       { name: 'Chou d’hiver', icon: '🥬', seed: 26, growMin: 16, yield: 1, sell: 48, seasons: ['hiver'],                repLvl: 2 },
+  raisin:     { name: 'Raisin',       icon: '🍇', seed: 35, growMin: 16, yield: 2, sell: 30, seasons: ['automne'],                   repLvl: 3 },
+  aubergine:  { name: 'Aubergine',    icon: '🍆', seed: 24, growMin: 12, yield: 2, sell: 20, seasons: ['ete','automne'],             repLvl: 3 }
+};
+
+// --- ANIMAUX ---
+// prodMin : minutes réelles entre deux productions (en étant nourri)
+// maxStock : productions accumulables non ramassées
+const ANIMALS = {
+  poule:  { name: 'Poule',  icon: '🐔', price: 200,  product: 'oeuf',        prodMin: 6,  maxStock: 5, repLvl: 0 },
+  chevre: { name: 'Chèvre', icon: '🐐', price: 500,  product: 'lait_chevre', prodMin: 9,  maxStock: 4, repLvl: 1 },
+  mouton: { name: 'Mouton', icon: '🐑', price: 650,  product: 'laine',       prodMin: 12, maxStock: 3, repLvl: 2 },
+  vache:  { name: 'Vache',  icon: '🐄', price: 900,  product: 'lait',        prodMin: 8,  maxStock: 4, repLvl: 2 },
+  cochon: { name: 'Cochon', icon: '🐷', price: 1200, product: 'truffe',      prodMin: 15, maxStock: 3, repLvl: 3 }
+};
+
+// --- OBJETS (récoltes, produits animaux, produits transformés) ---
+const ITEMS = {
+  // récoltes (sell = prix de base, modulé chaque jour par le marché)
+  ...Object.fromEntries(Object.entries(CROPS).map(([id, c]) => [id, { name: c.name, icon: c.icon, sell: c.sell }])),
+  // produits animaux
+  oeuf:        { name: 'Œuf',            icon: '🥚', sell: 18 },
+  lait:        { name: 'Lait',           icon: '🥛', sell: 45 },
+  lait_chevre: { name: 'Lait de chèvre', icon: '🍶', sell: 38 },
+  laine:       { name: 'Laine',          icon: '🧶', sell: 60 },
+  truffe:      { name: 'Truffe',         icon: '🍄', sell: 90 },
+  // produits transformés
+  farine:      { name: 'Farine',         icon: '🌾', sell: 55 },
+  pain:        { name: 'Pain',           icon: '🍞', sell: 150 },
+  fromage:     { name: 'Fromage',        icon: '🧀', sell: 130 },
+  fromage_chevre: { name: 'Fromage de chèvre', icon: '🧀', sell: 110 },
+  sauce_tomate: { name: 'Sauce tomate',  icon: '🥫', sell: 70 },
+  confiture:   { name: 'Confiture',      icon: '🍯', sell: 85 },
+  vin:         { name: 'Vin',            icon: '🍷', sell: 170 },
+  huile:       { name: 'Huile de tournesol', icon: '🫒', sell: 95 },
+  // divers
+  foin:        { name: 'Foin',           icon: '🌿', sell: 3 }
+};
+
+// --- BÂTIMENTS DE PRODUCTION ---
+// Chaque recette : entrées → 1 sortie après timeMin minutes.
+const BUILDINGS = {
+  moulin: {
+    name: 'Moulin', icon: '🏭', price: 600, repLvl: 1,
+    recipes: [
+      { id: 'farine', in: { ble: 3 }, out: 'farine', timeMin: 4 }
+    ]
+  },
+  four: {
+    name: 'Four', icon: '🍞', price: 900, repLvl: 1,
+    recipes: [
+      { id: 'pain', in: { farine: 2 }, out: 'pain', timeMin: 5 }
+    ]
+  },
+  conserverie: {
+    name: 'Conserverie', icon: '🥫', price: 1000, repLvl: 2,
+    recipes: [
+      { id: 'sauce_tomate', in: { tomate: 3 }, out: 'sauce_tomate', timeMin: 5 },
+      { id: 'confiture', in: { fraise: 3 }, out: 'confiture', timeMin: 6 }
+    ]
+  },
+  fromagerie: {
+    name: 'Fromagerie', icon: '🧀', price: 1200, repLvl: 2,
+    recipes: [
+      { id: 'fromage', in: { lait: 2 }, out: 'fromage', timeMin: 6 },
+      { id: 'fromage_chevre', in: { lait_chevre: 2 }, out: 'fromage_chevre', timeMin: 6 }
+    ]
+  },
+  pressoir: {
+    name: 'Pressoir', icon: '🍷', price: 1500, repLvl: 3,
+    recipes: [
+      { id: 'vin', in: { raisin: 3 }, out: 'vin', timeMin: 8 },
+      { id: 'huile', in: { tournesol: 2 }, out: 'huile', timeMin: 6 }
+    ]
+  }
+};
+
+// --- AMÉLIORATIONS ---
+const UPGRADES = {
+  arrosoir: {
+    name: 'Arrosoir', icon: '🚿',
+    levels: [
+      { desc: 'Arrose 1 parcelle par clic', cost: 0 },
+      { desc: 'Arrose 3 parcelles par clic', cost: 300 },
+      { desc: 'Arrose 6 parcelles par clic', cost: 800 },
+      { desc: 'Arrose toutes les parcelles', cost: 2000 },
+      { desc: 'Arrosage automatique chaque matin', cost: 5000 }
+    ]
+  },
+  stockage: {
+    name: 'Stockage', icon: '📦',
+    levels: [
+      { desc: 'Capacité : 50 objets', cost: 0, cap: 50 },
+      { desc: 'Capacité : 100 objets', cost: 300, cap: 100 },
+      { desc: 'Capacité : 200 objets', cost: 900, cap: 200 },
+      { desc: 'Capacité : 400 objets', cost: 2500, cap: 400 }
+    ]
+  },
+  grange: {
+    name: 'Grange', icon: '🏚️',
+    levels: [
+      { desc: 'Aucun animal possible', cost: 0, cap: 0 },
+      { desc: 'Jusqu’à 3 animaux', cost: 500, cap: 3 },
+      { desc: 'Jusqu’à 6 animaux', cost: 1200, cap: 6 },
+      { desc: 'Jusqu’à 9 animaux', cost: 2600, cap: 9 },
+      { desc: 'Jusqu’à 12 animaux', cost: 5000, cap: 12 }
+    ]
+  },
+  mangeoire: {
+    name: 'Mangeoire auto', icon: '🥣',
+    levels: [
+      { desc: 'Nourrissage manuel', cost: 0 },
+      { desc: 'Les animaux se nourrissent seuls (utilise blé ou foin du stock)', cost: 3500 }
+    ]
+  }
+};
+
+const PLOT_BASE = 6;          // parcelles de départ
+const PLOT_MAX = 24;
+const plotPrice = (owned) => Math.round(80 * Math.pow(1.45, owned - PLOT_BASE));
+
+const FEED_COST = 5;          // nourrir un animal : 1 blé, sinon 1 foin, sinon 5 pièces
+const HAY_PRICE = 6;
+
+// --- RÉPUTATION ---
+const REP_LEVELS = [
+  { min: 0,    name: 'Inconnu' },
+  { min: 40,   name: 'Nouveau venu' },
+  { min: 120,  name: 'Apprécié' },
+  { min: 300,  name: 'Respecté' },
+  { min: 700,  name: 'Célèbre' },
+  { min: 1500, name: 'Légendaire' }
+];
+
+// --- VILLAGEOIS (pour les quêtes) ---
+const VILLAGERS = [
+  { name: 'Marie',   icon: '👩‍🍳', title: 'la boulangère' },
+  { name: 'Henri',   icon: '👨‍🌾', title: 'l’épicier' },
+  { name: 'Léa',     icon: '👩‍⚕️', title: 'la vétérinaire' },
+  { name: 'Tom',     icon: '👨‍🔧', title: 'le charpentier' },
+  { name: 'Colette', icon: '👵',   title: 'l’aubergiste' },
+  { name: 'Bastien', icon: '🧑‍🎨', title: 'l’artiste' }
+];
+
+// Générateur pseudo-aléatoire déterministe (prix du marché quotidiens)
+function mulberry32(seed) {
+  return function () {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function hashStr(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+// Multiplicateur de prix du jour pour un objet (0.85 → 1.25)
+function dailyPriceMult(day, itemId) {
+  const r = mulberry32(day * 2654435761 ^ hashStr(itemId))();
+  return 0.85 + r * 0.40;
+}
+
+// ============================================================
+// GAME — état, simulation, systèmes. Tout est basé sur des
+// timestamps réels : le jeu progresse même fenêtre fermée.
+// ============================================================
+'use strict';
+
+const SAVE_KEY = 'petite-ferme-save-v1';
+
+let G = null;            // état du jeu
+const listeners = [];    // callbacks UI notifiés après chaque changement
+function onChange(fn) { listeners.push(fn); }
+function emit() { listeners.forEach(fn => fn()); }
+
+// File de notifications (toasts) consommée par l'UI
+const pendingToasts = [];
+function toast(msg, opts = {}) {
+  pendingToasts.push({ msg, ...opts });
+  if (opts.system && G && G.settings.systemNotifs && window.overlay) {
+    window.overlay.notify('Petite Ferme', msg.replace(/<[^>]+>/g, ''));
+  }
+}
+
+// ------------------------------------------------------------
+// État initial
+// ------------------------------------------------------------
+function newGame() {
+  const now = Date.now();
+  return {
+    version: 1,
+    createdAt: now,
+    lastTick: now,
+    money: 500,
+    rep: 0,
+    stats: { harvested: 0, sold: 0, earned: 0, questsDone: 0, daysPlayed: 0 },
+    day: 0,                       // index absolu de jour de jeu
+    dayStart: now,                // timestamp du début du jour courant
+    weather: 'soleil',
+    plots: Array.from({ length: PLOT_BASE }, () => emptyPlot()),
+    inventory: {},                // itemId -> quantité
+    animals: [],                  // { type, fedUntil, happiness, progressMs, stock, lastUpdate }
+    buildings: {},                // buildingId -> { recipeId, remaining, startedAt, output: {itemId: n} }
+    upgrades: { arrosoir: 0, stockage: 0, grange: 0, mangeoire: 0 },
+    quests: [],                   // { villager, itemId, qty, rewardMoney, rewardRep, expiresDay }
+    nextQuestDay: 1,
+    merchant: null,               // { itemId, mult, until }
+    tutorialStep: 0,
+    settings: {
+      alwaysOnTop: true, opacity: 1, compact: false,
+      sound: true, volume: 0.5, systemNotifs: false
+    }
+  };
+}
+function emptyPlot() {
+  return { crop: null, plantedAt: 0, progressMs: 0, wateredUntil: 0, lastUpdate: 0 };
+}
+
+// ------------------------------------------------------------
+// Aides temps / saison / météo
+// ------------------------------------------------------------
+function seasonOfDay(day) { return SEASONS[Math.floor(day / SEASON_DAYS) % 4]; }
+function currentSeason() { return seasonOfDay(G.day); }
+function dayInSeason() { return (G.day % SEASON_DAYS) + 1; }
+function yearNum() { return Math.floor(G.day / (SEASON_DAYS * 4)) + 1; }
+
+function rollWeather(day) {
+  const table = WEATHER_TABLE[seasonOfDay(day).id];
+  const r = mulberry32(day * 7919 + 13)() * 100;
+  let acc = 0;
+  for (const [w, p] of table) { acc += p; if (r < acc) return w; }
+  return table[0][0];
+}
+
+// ------------------------------------------------------------
+// Réputation
+// ------------------------------------------------------------
+function repLevel() {
+  let lvl = 0;
+  for (let i = 0; i < REP_LEVELS.length; i++) if (G.rep >= REP_LEVELS[i].min) lvl = i;
+  return lvl;
+}
+function addRep(n) {
+  const before = repLevel();
+  G.rep += n;
+  const after = repLevel();
+  if (after > before) {
+    toast(`⭐ Réputation : vous êtes maintenant <b>${REP_LEVELS[after].name}</b> ! De nouvelles choses sont débloquées.`, { system: true });
+  }
+}
+
+// ------------------------------------------------------------
+// Inventaire
+// ------------------------------------------------------------
+function invCount() { return Object.values(G.inventory).reduce((a, b) => a + b, 0); }
+function invCap() { return UPGRADES.stockage.levels[G.upgrades.stockage].cap; }
+function invAdd(itemId, qty) {
+  const space = invCap() - invCount();
+  const added = Math.max(0, Math.min(qty, space));
+  if (added > 0) G.inventory[itemId] = (G.inventory[itemId] || 0) + added;
+  if (added < qty) toast('📦 Stockage plein ! Améliorez-le ou vendez des objets.');
+  return added;
+}
+function invRemove(itemId, qty) {
+  if ((G.inventory[itemId] || 0) < qty) return false;
+  G.inventory[itemId] -= qty;
+  if (G.inventory[itemId] <= 0) delete G.inventory[itemId];
+  return true;
+}
+
+// ------------------------------------------------------------
+// Prix du marché (variation quotidienne douce)
+// ------------------------------------------------------------
+function sellPrice(itemId) {
+  let p = ITEMS[itemId].sell * dailyPriceMult(G.day, itemId);
+  if (G.merchant && G.merchant.itemId === itemId && Date.now() < G.merchant.until) p *= G.merchant.mult;
+  return Math.max(1, Math.round(p));
+}
+
+// ------------------------------------------------------------
+// Simulation — avance le temps par tranches de jour
+// ------------------------------------------------------------
+function advance(now) {
+  let guard = 0;
+  while (guard++ < 5000) {
+    const dayEnd = G.dayStart + DAY_MS;
+    const sliceEnd = Math.min(now, dayEnd);
+    simulateRange(G.lastTick, sliceEnd);
+    G.lastTick = sliceEnd;
+    if (sliceEnd >= now) break;
+    // passage au jour suivant
+    G.day++;
+    G.dayStart = dayEnd;
+    G.stats.daysPlayed++;
+    onNewDay();
+  }
+}
+
+function simulateRange(from, to) {
+  if (to <= from) return;
+  const snowSlow = (G.weather === 'neige') ? 0.75 : 1;
+
+  // Cultures : la croissance n'avance que pendant les périodes arrosées
+  for (const plot of G.plots) {
+    if (!plot.crop) continue;
+    const start = Math.max(from, plot.plantedAt);
+    const end = Math.min(to, plot.wateredUntil);
+    if (end > start) plot.progressMs += (end - start);
+  }
+
+  // Animaux : produisent tant qu'ils sont nourris
+  for (const a of G.animals) {
+    const def = ANIMALS[a.type];
+    const start = Math.max(from, a.lastUpdate || from);
+    const end = Math.min(to, a.fedUntil);
+    if (end > start) {
+      const happyBoost = 1 + (a.happiness - 50) / 200;   // 0.75× à 1.25×
+      a.progressMs += (end - start) * happyBoost * snowSlow;
+      const interval = def.prodMin * MIN;
+      while (a.progressMs >= interval && a.stock < def.maxStock) {
+        a.progressMs -= interval;
+        a.stock++;
+      }
+      if (a.stock >= def.maxStock) a.progressMs = Math.min(a.progressMs, interval);
+    }
+    a.lastUpdate = to;
+  }
+
+  // Bâtiments : lots en cours
+  for (const [bid, b] of Object.entries(G.buildings)) {
+    if (!b.recipeId || b.remaining <= 0) continue;
+    const recipe = BUILDINGS[bid].recipes.find(r => r.id === b.recipeId);
+    if (!recipe) { b.recipeId = null; b.remaining = 0; continue; }
+    const dur = recipe.timeMin * MIN / snowSlow;
+    while (b.remaining > 0 && b.startedAt + dur <= to) {
+      b.output[recipe.out] = (b.output[recipe.out] || 0) + 1;
+      b.remaining--;
+      b.startedAt += dur;
+    }
+    if (b.remaining <= 0) b.recipeId = null;
+  }
+}
+
+function onNewDay() {
+  G.weather = rollWeather(G.day);
+
+  // Pluie / orage : arrose toutes les parcelles plantées pour la journée
+  if (G.weather === 'pluie' || G.weather === 'orage') {
+    for (const plot of G.plots) {
+      if (plot.crop) plot.wateredUntil = Math.max(plot.wateredUntil, G.dayStart + DAY_MS);
+    }
+  }
+  // Arrosage automatique (arrosoir niv. 5)
+  if (G.upgrades.arrosoir >= 4) {
+    for (const plot of G.plots) {
+      if (plot.crop) plot.wateredUntil = Math.max(plot.wateredUntil, G.dayStart + DAY_MS);
+    }
+  }
+
+  // Animaux : bonheur selon nourrissage, mangeoire automatique
+  for (const a of G.animals) {
+    if (G.upgrades.mangeoire >= 1 && a.fedUntil < G.dayStart + DAY_MS) {
+      if (invRemove('ble', 1) || invRemove('foin', 1)) {
+        a.fedUntil = G.dayStart + DAY_MS;
+      }
+    }
+    if (a.fedUntil >= G.dayStart) a.happiness = Math.min(100, a.happiness + 5);
+    else a.happiness = Math.max(0, a.happiness - 10);
+  }
+
+  // Quêtes : nouvelles offres
+  maybeGenerateQuests();
+  // Quêtes expirées
+  const before = G.quests.length;
+  G.quests = G.quests.filter(q => q.expiresDay >= G.day);
+  if (G.quests.length < before) toast('📜 Une commande du village a expiré.');
+
+  // Marchand ambulant (~1 jour sur 6)
+  if (!G.merchant && mulberry32(G.day * 31 + 7)() < 0.17) {
+    const sellable = Object.keys(G.inventory).length
+      ? Object.keys(G.inventory) : ['ble', 'carotte', 'oeuf'];
+    const itemId = sellable[Math.floor(mulberry32(G.day * 77)() * sellable.length)];
+    G.merchant = { itemId, mult: 1.6, until: G.dayStart + DAY_MS };
+    toast(`🧳 Un marchand ambulant achète <b>${ITEMS[itemId].name}</b> à +60 % aujourd'hui !`, { system: true });
+  }
+  if (G.merchant && G.merchant.until < Date.now()) G.merchant = null;
+}
+
+// ------------------------------------------------------------
+// Quêtes
+// ------------------------------------------------------------
+function maybeGenerateQuests() {
+  while (G.quests.length < 3 && G.day >= G.nextQuestDay) {
+    G.nextQuestDay = G.day + 1;
+    const lvl = repLevel();
+    const pool = [
+      ...Object.keys(CROPS).filter(c => CROPS[c].repLvl <= lvl),
+      ...(G.animals.length ? Object.values(ANIMALS).filter(a => a.repLvl <= lvl).map(a => a.product) : []),
+      ...(Object.keys(G.buildings).length ? ['farine', 'pain'] : [])
+    ];
+    const itemId = pool[Math.floor(Math.random() * pool.length)];
+    const val = ITEMS[itemId].sell;
+    const qty = Math.max(2, Math.min(12, Math.round(60 / val) + Math.floor(Math.random() * 4)));
+    const v = VILLAGERS[Math.floor(Math.random() * VILLAGERS.length)];
+    G.quests.push({
+      id: Date.now() + Math.random(),
+      villager: v,
+      itemId, qty,
+      rewardMoney: Math.round(val * qty * 1.5),
+      rewardRep: 5 + Math.floor(val * qty / 40),
+      expiresDay: G.day + 4
+    });
+    toast(`📜 ${v.icon} ${v.name} ${v.title} a passé une commande : ${qty} × ${ITEMS[itemId].icon} ${ITEMS[itemId].name}`, { system: true });
+  }
+}
+
+function completeQuest(qid) {
+  const q = G.quests.find(x => x.id === qid);
+  if (!q) return;
+  if (!invRemove(q.itemId, q.qty)) { toast('❌ Pas assez d’objets en stock.'); return; }
+  G.money += q.rewardMoney;
+  addRep(q.rewardRep);
+  G.stats.questsDone++;
+  G.quests = G.quests.filter(x => x.id !== qid);
+  toast(`✅ Commande livrée à ${q.villager.name} ! +${q.rewardMoney} 💰, +${q.rewardRep} ⭐`);
+  playSound('sell');
+  save(); emit();
+}
+function declineQuest(qid) {
+  G.quests = G.quests.filter(x => x.id !== qid);
+  save(); emit();
+}
+
+// ------------------------------------------------------------
+// Actions du joueur — CULTURES
+// ------------------------------------------------------------
+function availableCrops() {
+  const lvl = repLevel();
+  const season = currentSeason().id;
+  return Object.entries(CROPS)
+    .filter(([, c]) => c.repLvl <= lvl)
+    .map(([id, c]) => ({ id, ...c, inSeason: c.seasons.includes(season) }));
+}
+
+function plantCrop(plotIdx, cropId) {
+  const plot = G.plots[plotIdx];
+  const crop = CROPS[cropId];
+  if (!plot || plot.crop || !crop) return;
+  if (!crop.seasons.includes(currentSeason().id)) { toast('🍂 Hors saison pour cette culture.'); return; }
+  if (G.money < crop.seed) { toast('💰 Pas assez d’argent.'); return; }
+  G.money -= crop.seed;
+  const now = Date.now();
+  plot.crop = cropId;
+  plot.plantedAt = now;
+  plot.progressMs = 0;
+  plot.wateredUntil = 0;
+  if (G.upgrades.arrosoir >= 4) plot.wateredUntil = G.dayStart + DAY_MS;
+  playSound('plant');
+  tutorialAdvance(1);
+  save(); emit();
+}
+
+function waterPlot(plotIdx) {
+  const now = Date.now();
+  const lvlN = [1, 3, 6, 99, 99][G.upgrades.arrosoir];
+  let watered = 0;
+  // arrose la parcelle cliquée puis les autres parcelles sèches
+  const order = [G.plots[plotIdx], ...G.plots.filter((_, i) => i !== plotIdx)];
+  for (const plot of order) {
+    if (watered >= lvlN) break;
+    if (plot && plot.crop && plot.wateredUntil < now + 30000 && plot.progressMs < CROPS[plot.crop].growMin * MIN) {
+      plot.wateredUntil = now + DAY_MS;
+      watered++;
+    }
+  }
+  if (watered > 0) { playSound('water'); tutorialAdvance(2); save(); emit(); }
+}
+
+function plotReady(plot) {
+  return plot.crop && plot.progressMs >= CROPS[plot.crop].growMin * MIN;
+}
+
+function harvestPlot(plotIdx) {
+  const plot = G.plots[plotIdx];
+  if (!plot || !plotReady(plot)) return;
+  const crop = CROPS[plot.crop];
+  const got = invAdd(plot.crop, crop.yield);
+  if (got > 0) {
+    G.stats.harvested += got;
+    toast(`${crop.icon} +${got} ${crop.name}`);
+    playSound('harvest');
+    Object.assign(plot, emptyPlot());
+    tutorialAdvance(3);
+    save(); emit();
+  }
+}
+
+function harvestAll() {
+  let did = false;
+  G.plots.forEach((p, i) => { if (plotReady(p)) { harvestPlot(i); did = true; } });
+  return did;
+}
+
+function buyPlot() {
+  if (G.plots.length >= PLOT_MAX) return;
+  const price = plotPrice(G.plots.length);
+  if (G.money < price) { toast('💰 Pas assez d’argent.'); return; }
+  G.money -= price;
+  G.plots.push(emptyPlot());
+  toast('🟫 Nouvelle parcelle achetée !');
+  save(); emit();
+}
+
+// ------------------------------------------------------------
+// Actions du joueur — ANIMAUX
+// ------------------------------------------------------------
+function animalCap() { return UPGRADES.grange.levels[G.upgrades.grange].cap; }
+
+function buyAnimal(type) {
+  const def = ANIMALS[type];
+  if (!def || def.repLvl > repLevel()) return;
+  if (G.animals.length >= animalCap()) { toast('🏚️ Grange pleine ! Améliorez-la.'); return; }
+  if (G.money < def.price) { toast('💰 Pas assez d’argent.'); return; }
+  G.money -= def.price;
+  const now = Date.now();
+  G.animals.push({ type, fedUntil: now + DAY_MS, happiness: 50, progressMs: 0, stock: 0, lastUpdate: now });
+  toast(`${def.icon} Un ${def.name.toLowerCase()} rejoint votre ferme !`);
+  playSound('buy');
+  save(); emit();
+}
+
+function feedAnimal(idx) {
+  const a = G.animals[idx];
+  if (!a) return;
+  const now = Date.now();
+  if (a.fedUntil > now + DAY_MS - 60000) return; // déjà nourri
+  if (invRemove('ble', 1) || invRemove('foin', 1)) {
+    a.fedUntil = Math.max(a.fedUntil, now) ;
+    a.fedUntil = now + DAY_MS;
+  } else if (G.money >= FEED_COST) {
+    G.money -= FEED_COST;
+    a.fedUntil = now + DAY_MS;
+  } else { toast('🌿 Rien pour le nourrir ! (blé, foin ou 5 pièces)'); return; }
+  a.lastUpdate = now;
+  playSound('feed');
+  save(); emit();
+}
+function feedAllAnimals() { G.animals.forEach((_, i) => feedAnimal(i)); }
+
+function collectAnimal(idx) {
+  const a = G.animals[idx];
+  if (!a || a.stock <= 0) return;
+  const def = ANIMALS[a.type];
+  const got = invAdd(def.product, a.stock);
+  if (got > 0) {
+    toast(`${ITEMS[def.product].icon} +${got} ${ITEMS[def.product].name}`);
+    a.stock -= got;
+    playSound('harvest');
+    save(); emit();
+  }
+}
+function collectAllAnimals() { G.animals.forEach((_, i) => collectAnimal(i)); }
+
+// ------------------------------------------------------------
+// Actions du joueur — BÂTIMENTS / PRODUCTION
+// ------------------------------------------------------------
+function buyBuilding(bid) {
+  const def = BUILDINGS[bid];
+  if (!def || G.buildings[bid] || def.repLvl > repLevel()) return;
+  if (G.money < def.price) { toast('💰 Pas assez d’argent.'); return; }
+  G.money -= def.price;
+  G.buildings[bid] = { recipeId: null, remaining: 0, startedAt: 0, output: {} };
+  toast(`${def.icon} ${def.name} construit(e) !`);
+  playSound('buy');
+  save(); emit();
+}
+
+function startRecipe(bid, recipeId, batches) {
+  const b = G.buildings[bid];
+  const recipe = BUILDINGS[bid].recipes.find(r => r.id === recipeId);
+  if (!b || !recipe || b.remaining > 0) return;
+  // vérifie les entrées pour tous les lots
+  for (const [item, qty] of Object.entries(recipe.in)) {
+    if ((G.inventory[item] || 0) < qty * batches) { toast('❌ Pas assez d’ingrédients.'); return; }
+  }
+  for (const [item, qty] of Object.entries(recipe.in)) invRemove(item, qty * batches);
+  b.recipeId = recipeId;
+  b.remaining = batches;
+  b.startedAt = Date.now();
+  playSound('craft');
+  save(); emit();
+}
+
+function collectBuilding(bid) {
+  const b = G.buildings[bid];
+  if (!b) return;
+  let any = false;
+  for (const [item, qty] of Object.entries(b.output)) {
+    if (qty <= 0) continue;
+    const got = invAdd(item, qty);
+    if (got > 0) {
+      b.output[item] -= got;
+      toast(`${ITEMS[item].icon} +${got} ${ITEMS[item].name}`);
+      any = true;
+    }
+  }
+  for (const k of Object.keys(b.output)) if (b.output[k] <= 0) delete b.output[k];
+  if (any) { playSound('harvest'); save(); emit(); }
+}
+
+// ------------------------------------------------------------
+// Actions du joueur — MARCHÉ
+// ------------------------------------------------------------
+function sellItem(itemId, qty) {
+  const have = G.inventory[itemId] || 0;
+  qty = Math.min(qty, have);
+  if (qty <= 0) return;
+  const gain = sellPrice(itemId) * qty;
+  invRemove(itemId, qty);
+  G.money += gain;
+  G.stats.sold += qty;
+  G.stats.earned += gain;
+  addRep(Math.floor(gain / 100));
+  toast(`💰 +${gain} (${qty} × ${ITEMS[itemId].name})`);
+  playSound('sell');
+  tutorialAdvance(4);
+  save(); emit();
+}
+function sellAll() {
+  for (const itemId of Object.keys(G.inventory)) {
+    if (itemId === 'foin') continue;
+    sellItem(itemId, G.inventory[itemId]);
+  }
+}
+function buyHay(qty) {
+  const cost = HAY_PRICE * qty;
+  if (G.money < cost) { toast('💰 Pas assez d’argent.'); return; }
+  if (invAdd('foin', qty) > 0) { G.money -= cost; playSound('buy'); save(); emit(); }
+}
+
+// ------------------------------------------------------------
+// Améliorations
+// ------------------------------------------------------------
+function buyUpgrade(uid) {
+  const def = UPGRADES[uid];
+  const cur = G.upgrades[uid];
+  if (!def || cur >= def.levels.length - 1) return;
+  const next = def.levels[cur + 1];
+  if (G.money < next.cost) { toast('💰 Pas assez d’argent.'); return; }
+  G.money -= next.cost;
+  G.upgrades[uid] = cur + 1;
+  toast(`${def.icon} ${def.name} amélioré : ${next.desc}`);
+  playSound('buy');
+  save(); emit();
+}
+
+// ------------------------------------------------------------
+// Tutoriel léger (5 étapes)
+// ------------------------------------------------------------
+const TUTORIAL = [
+  '👋 Bienvenue ! Achetez des graines : cliquez sur une parcelle 🟫 vide.',
+  '🌱 Bien ! Maintenant arrosez : cliquez sur la parcelle plantée (💧).',
+  '⏳ Parfait. La culture pousse toute seule — même si vous regardez autre chose !',
+  '🌾 Récoltez en cliquant sur la culture prête, puis vendez au Marché 🛒.',
+  '🎉 Vous savez tout ! Laissez la fenêtre dans un coin et revenez de temps en temps.'
+];
+function tutorialAdvance(step) {
+  if (G.tutorialStep === step - 1) {
+    G.tutorialStep = step;
+    if (step < TUTORIAL.length) toast(TUTORIAL[step]);
+  }
+}
+
+// ------------------------------------------------------------
+// Audio minimaliste (WebAudio, aucun fichier)
+// ------------------------------------------------------------
+let audioCtx = null;
+const SOUND_FREQS = { plant: 320, water: 520, harvest: 660, sell: 780, buy: 440, feed: 380, craft: 560, notif: 700 };
+function playSound(kind) {
+  if (!G || !G.settings.sound) return;
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'sine';
+    o.frequency.value = SOUND_FREQS[kind] || 500;
+    g.gain.value = 0.06 * (G.settings.volume ?? 0.5);
+    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.18);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + 0.2);
+  } catch { /* audio indisponible : silencieux */ }
+}
+
+// ------------------------------------------------------------
+// Sauvegarde
+// ------------------------------------------------------------
+let saveTimer = null;
+function save() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(G)); } catch { /* stockage indisponible */ }
+  }, 250);
+}
+function exportSave() { return JSON.stringify(G); }
+function importSave(json) {
+  const data = JSON.parse(json);
+  if (!data || typeof data.money !== 'number') throw new Error('Sauvegarde invalide');
+  G = migrate(data);
+  save(); emit();
+}
+function resetGame() {
+  localStorage.removeItem(SAVE_KEY);
+  G = newGame();
+  toast(TUTORIAL[0]);
+  save(); emit();
+}
+function migrate(data) {
+  const base = newGame();
+  const g = { ...base, ...data };
+  g.settings = { ...base.settings, ...(data.settings || {}) };
+  g.upgrades = { ...base.upgrades, ...(data.upgrades || {}) };
+  g.stats = { ...base.stats, ...(data.stats || {}) };
+  return g;
+}
+
+// ------------------------------------------------------------
+// Boucle & init
+// ------------------------------------------------------------
+function summarizeOffline(before, after, elapsedMs) {
+  if (elapsedMs < 2 * MIN) return;
+  const parts = [];
+  const readyPlots = G.plots.filter(plotReady).length;
+  if (readyPlots) parts.push(`🌾 ${readyPlots} culture(s) prête(s)`);
+  const animalStock = G.animals.reduce((s, a) => s + a.stock, 0);
+  if (animalStock) parts.push(`🐔 ${animalStock} produit(s) animal(aux)`);
+  const prodOut = Object.values(G.buildings).reduce((s, b) => s + Object.values(b.output).reduce((x, y) => x + y, 0), 0);
+  if (prodOut) parts.push(`🏭 ${prodOut} produit(s) fabriqué(s)`);
+  const mins = Math.round(elapsedMs / MIN);
+  if (parts.length) toast(`⏰ Pendant votre absence (${mins} min) : ${parts.join(' · ')}`);
+}
+
+// Détection d'événements "devenus prêts" pour notifier discrètement
+let readyState = { plots: 0, animals: 0, prod: 0 };
+function detectReadyEvents() {
+  const plots = G.plots.filter(plotReady).length;
+  const animals = G.animals.reduce((s, a) => s + a.stock, 0);
+  const prod = Object.values(G.buildings).reduce((s, b) => s + Object.values(b.output).reduce((x, y) => x + y, 0), 0);
+  if (plots > readyState.plots) { toast('🌾 Une culture est prête à être récoltée !', { system: true }); playSound('notif'); }
+  if (animals > readyState.animals) { toast('🐔 Vos animaux ont produit quelque chose.', { system: true }); }
+  if (prod > readyState.prod) { toast('🏭 Une production est terminée.', { system: true }); }
+  readyState = { plots, animals, prod };
+}
+
+function initGame() {
+  const raw = localStorage.getItem(SAVE_KEY);
+  if (raw) {
+    try { G = migrate(JSON.parse(raw)); } catch { G = newGame(); }
+  } else {
+    G = newGame();
+    toast(TUTORIAL[0]);
+  }
+  const now = Date.now();
+  const elapsed = now - G.lastTick;
+  advance(now);
+  if (raw) summarizeOffline(null, null, elapsed);
+  readyState = {
+    plots: G.plots.filter(plotReady).length,
+    animals: G.animals.reduce((s, a) => s + a.stock, 0),
+    prod: Object.values(G.buildings).reduce((s, b) => s + Object.values(b.output).reduce((x, y) => x + y, 0), 0)
+  };
+  save();
+
+  // Tick léger : 1×/seconde (le rendu ne touche au DOM que si nécessaire)
+  setInterval(() => {
+    advance(Date.now());
+    detectReadyEvents();
+    emit();
+  }, 1000);
+  // Autosauvegarde périodique
+  setInterval(() => save(), 30000);
+  window.addEventListener('beforeunload', () => {
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(G)); } catch { /* rien */ }
+  });
+}
+
+// ============================================================
+// UI — rendu compact et panneaux. Le DOM n'est mis à jour que
+// si le HTML généré change (faible coût CPU en arrière-plan).
+// ============================================================
+'use strict';
+
+const $ = (s) => document.querySelector(s);
+const el = {
+  money: $('#tb-money'), rep: $('#tb-rep'), day: $('#tb-day'), weather: $('#tb-weather'),
+  plots: $('#plots'), animals: $('#animals-strip'), buildings: $('#buildings-strip'),
+  toasts: $('#toasts'), panelC: $('#panel-container'), panel: $('#panel'),
+  tabbar: $('#tabbar'), pin: $('#btn-pin')
+};
+
+let openPanel = null;        // { type, ctx }
+const htmlCache = {};        // section -> dernier HTML rendu
+function setHTML(node, key, html) {
+  if (htmlCache[key] !== html) { htmlCache[key] = html; node.innerHTML = html; }
+}
+
+function fmtTime(ms) {
+  if (ms <= 0) return 'prêt';
+  const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000);
+  return m > 0 ? `${m}m${String(s).padStart(2, '0')}` : `${s}s`;
+}
+function esc(s) { return String(s).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c])); }
+
+// ------------------------------------------------------------
+// Rendu principal
+// ------------------------------------------------------------
+function render() {
+  renderTitlebar();
+  renderFarm();
+  renderBadges();
+  drainToasts();
+  if (openPanel) renderPanel();
+}
+
+function renderTitlebar() {
+  el.money.textContent = `💰 ${G.money}`;
+  const lvl = repLevel();
+  el.rep.textContent = `⭐ ${REP_LEVELS[lvl].name}`;
+  el.rep.title = `Réputation : ${G.rep} points`;
+  const s = currentSeason();
+  el.day.textContent = `J${dayInSeason()} · ${s.name} ${s.icon}`;
+  el.day.title = `Année ${yearNum()}, jour ${G.day + 1}`;
+  const w = WEATHER[G.weather];
+  el.weather.textContent = w.icon;
+  el.weather.title = w.name;
+  el.pin.classList.toggle('off', !G.settings.alwaysOnTop);
+}
+
+function renderFarm() {
+  const now = Date.now();
+
+  // --- Parcelles ---
+  let h = `<div class="section-head">🌱 Parcelles <span class="spacer"></span>`;
+  if (G.plots.some(plotReady)) h += `<button data-act="harvest-all">🌾 Tout récolter</button>`;
+  const dry = G.plots.some(p => p.crop && !plotReady(p) && p.wateredUntil < now);
+  if (dry) h += `<button data-act="water-all">🚿 Arroser</button>`;
+  h += `</div><div id="plots-grid">`;
+  G.plots.forEach((p, i) => {
+    if (!p.crop) {
+      h += `<div class="plot" data-plot="${i}" title="Planter une graine">🟫</div>`;
+      return;
+    }
+    const crop = CROPS[p.crop];
+    const total = crop.growMin * MIN;
+    const prog = Math.min(1, p.progressMs / total);
+    const ready = prog >= 1;
+    const watered = p.wateredUntil > now;
+    let icon = ready ? crop.icon : (prog < 0.5 ? '🌱' : '🌿');
+    let cls = 'plot' + (watered ? ' watered' : '') + (ready ? ' ready' : '');
+    let extra = '';
+    if (!ready) {
+      extra += `<span class="drop">${watered ? '💧' : '❗'}</span>`;
+      extra += `<div class="pbar"><i style="width:${Math.round(prog * 100)}%"></i></div>`;
+      const remaining = watered ? (total - p.progressMs) : Infinity;
+      extra += `<span class="timer">${watered ? fmtTime(remaining) : 'à arroser'}</span>`;
+    }
+    const title = ready ? `${crop.name} — récolter !` : (watered ? `${crop.name} — pousse (${fmtTime(total - p.progressMs)})` : `${crop.name} — a besoin d'eau !`);
+    h += `<div class="${cls}" data-plot="${i}" title="${title}">${icon}${extra}</div>`;
+  });
+  if (G.plots.length < PLOT_MAX) {
+    h += `<div class="plot buy-plot" data-act="buy-plot" title="Acheter une parcelle"><span>➕</span><span class="price">${plotPrice(G.plots.length)}</span></div>`;
+  }
+  h += `</div>`;
+  setHTML(el.plots, 'plots', h);
+
+  // --- Animaux ---
+  let ha = '';
+  if (G.animals.length > 0 || G.upgrades.grange > 0) {
+    ha = `<div class="section-head">🐄 Animaux <span class="spacer"></span>`;
+    if (G.animals.some(a => a.stock > 0)) ha += `<button data-act="collect-animals">🧺 Ramasser</button>`;
+    if (G.animals.some(a => a.fedUntil < now)) ha += `<button data-act="feed-animals">🌿 Nourrir</button>`;
+    ha += `</div><div class="strip">`;
+    G.animals.forEach((a, i) => {
+      const def = ANIMALS[a.type];
+      const fed = a.fedUntil > now;
+      const interval = def.prodMin * MIN;
+      const prog = a.stock >= def.maxStock ? 1 : Math.min(1, a.progressMs / interval);
+      let extra = '';
+      if (a.stock > 0) extra += `<span class="stock">${a.stock}</span>`;
+      if (!fed) extra += `<span class="hungry">🍽️❗</span>`;
+      else extra += `<div class="pbar"><i style="width:${Math.round(prog * 100)}%"></i></div>`;
+      const title = `${def.name} — ${fed ? 'nourri' : 'AFFAMÉ (cliquez !)'} · bonheur ${Math.round(a.happiness)}% · ${a.stock} ${ITEMS[def.product].name}(s) à ramasser`;
+      ha += `<div class="critter" data-animal="${i}" title="${title}">${def.icon}${extra}</div>`;
+    });
+    ha += `</div>`;
+  }
+  setHTML(el.animals, 'animals', ha);
+
+  // --- Bâtiments ---
+  let hb = '';
+  const owned = Object.keys(G.buildings);
+  if (owned.length > 0) {
+    hb = `<div class="section-head">🏭 Production</div><div class="strip">`;
+    for (const bid of owned) {
+      const def = BUILDINGS[bid];
+      const b = G.buildings[bid];
+      const outCount = Object.values(b.output).reduce((x, y) => x + y, 0);
+      let extra = '';
+      let title = def.name;
+      if (outCount > 0) { extra += `<span class="stock">${outCount}</span>`; title += ` — ${outCount} produit(s) prêt(s) !`; }
+      if (b.recipeId && b.remaining > 0) {
+        const recipe = def.recipes.find(r => r.id === b.recipeId);
+        const dur = recipe.timeMin * MIN;
+        const prog = Math.min(1, (now - b.startedAt) / dur);
+        extra += `<div class="pbar"><i style="width:${Math.round(prog * 100)}%"></i></div>`;
+        title += ` — fabrique ${ITEMS[recipe.out].name} (${fmtTime(b.startedAt + dur - now)}, reste ${b.remaining} lot(s))`;
+      } else if (outCount === 0) {
+        title += ' — inactif (cliquez pour lancer une production)';
+      }
+      hb += `<div class="bldg" data-bldg="${bid}" title="${title}">${def.icon}${extra}</div>`;
+    }
+    hb += `</div>`;
+  }
+  setHTML(el.buildings, 'buildings', hb);
+}
+
+function renderBadges() {
+  const now = Date.now();
+  const badges = {
+    ferme: G.plots.filter(plotReady).length,
+    animaux: G.animals.reduce((s, a) => s + a.stock, 0) + G.animals.filter(a => a.fedUntil < now).length,
+    production: Object.values(G.buildings).reduce((s, b) => s + Object.values(b.output).reduce((x, y) => x + y, 0), 0),
+    marche: (G.merchant && G.merchant.until > now) ? 1 : 0,
+    quetes: G.quests.length
+  };
+  el.tabbar.querySelectorAll('button').forEach(btn => {
+    const tab = btn.dataset.tab;
+    const badge = btn.querySelector('.badge');
+    if (!badge) return;
+    const n = badges[tab] || 0;
+    badge.classList.toggle('hidden', n === 0);
+    badge.textContent = n > 9 ? '9+' : n;
+  });
+}
+
+// ------------------------------------------------------------
+// Toasts
+// ------------------------------------------------------------
+function drainToasts() {
+  while (pendingToasts.length) {
+    const t = pendingToasts.shift();
+    const div = document.createElement('div');
+    div.className = 'toast';
+    div.innerHTML = t.msg;
+    el.toasts.appendChild(div);
+    while (el.toasts.children.length > 3) el.toasts.firstChild.remove();
+    setTimeout(() => { div.classList.add('fadeout'); setTimeout(() => div.remove(), 450); }, 3800);
+  }
+}
+
+// ------------------------------------------------------------
+// Panneaux
+// ------------------------------------------------------------
+function showPanel(type, ctx = {}) {
+  openPanel = { type, ctx };
+  el.panelC.classList.remove('hidden');
+  renderPanel(true);
+}
+function closePanel() {
+  openPanel = null;
+  el.panelC.classList.add('hidden');
+  el.tabbar.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.tab === 'ferme'));
+}
+
+function panelHead(title) {
+  return `<div class="panel-head">${title}<span class="spacer"></span><button class="panel-close" data-act="close-panel">✕</button></div>`;
+}
+
+function renderPanel(force) {
+  const { type, ctx } = openPanel;
+  let h = '';
+  if (type === 'seeds') h = panelSeeds(ctx);
+  else if (type === 'animaux') h = panelAnimals();
+  else if (type === 'production') h = panelProduction();
+  else if (type === 'bldg') h = panelBuilding(ctx);
+  else if (type === 'marche') h = panelMarket();
+  else if (type === 'quetes') h = panelQuests();
+  else if (type === 'ameliorations') h = panelUpgrades();
+  else if (type === 'reglages') h = panelSettings();
+  if (force) htmlCache.panel = null;
+  setHTML(el.panel, 'panel', h);
+}
+
+// --- Choix de graine ---
+function panelSeeds(ctx) {
+  let h = panelHead('🌱 Planter une graine');
+  const crops = availableCrops();
+  const inSeason = crops.filter(c => c.inSeason);
+  const off = crops.filter(c => !c.inSeason);
+  if (inSeason.length === 0) h += `<div class="row"><span class="grow sub">Aucune culture de saison… L'hiver est le moment de s'occuper des animaux et de la production !</span></div>`;
+  for (const c of inSeason) {
+    const afford = G.money >= c.seed;
+    h += `<div class="row"><span class="ic">${c.icon}</span>
+      <span class="grow"><span class="name">${c.name}</span>
+      <div class="sub">⏱️ ${c.growMin} min · récolte ×${c.yield} · vente ~${c.sell}/u</div></span>
+      <span class="actions"><button data-act="plant" data-crop="${c.id}" data-plot="${ctx.plotIdx}" ${afford ? '' : 'disabled'}>🪙 ${c.seed}</button></span></div>`;
+  }
+  for (const c of off) {
+    h += `<div class="row locked"><span class="ic">${c.icon}</span>
+      <span class="grow"><span class="name">${c.name}</span>
+      <div class="sub">Saisons : ${c.seasons.map(s => SEASONS.find(x => x.id === s).icon).join(' ')}</div></span>
+      <span class="tag off">hors saison</span></div>`;
+  }
+  const lvl = repLevel();
+  const lockedCrops = Object.values(CROPS).filter(c => c.repLvl > lvl);
+  if (lockedCrops.length) h += `<div class="row locked"><span class="ic">🔒</span><span class="grow sub">${lockedCrops.length} culture(s) à débloquer en gagnant de la réputation (commandes du village, ventes)</span></div>`;
+  return h;
+}
+
+// --- Animaux ---
+function panelAnimals() {
+  const now = Date.now();
+  let h = panelHead(`🐄 Animaux (${G.animals.length}/${animalCap()})`);
+  if (G.upgrades.grange === 0) {
+    h += `<div class="row"><span class="ic">🏚️</span><span class="grow"><span class="name">Construire une grange</span>
+      <div class="sub">Nécessaire pour accueillir des animaux</div></span>
+      <span class="actions"><button data-act="upgrade" data-up="grange" ${G.money >= UPGRADES.grange.levels[1].cost ? '' : 'disabled'}>🪙 ${UPGRADES.grange.levels[1].cost}</button></span></div>`;
+  }
+  // animaux possédés
+  G.animals.forEach((a, i) => {
+    const def = ANIMALS[a.type];
+    const fed = a.fedUntil > now;
+    h += `<div class="row"><span class="ic">${def.icon}</span>
+      <span class="grow"><span class="name">${def.name}</span>
+      <div class="sub">${fed ? '✅ nourri' : '🍽️ affamé !'} · ❤️ ${Math.round(a.happiness)}% · ${ITEMS[def.product].icon} ×${a.stock}</div></span>
+      <span class="actions">
+        ${a.stock > 0 ? `<button data-act="collect-animal" data-idx="${i}">🧺 ${a.stock}</button>` : ''}
+        ${!fed ? `<button data-act="feed-animal" data-idx="${i}">🌿 Nourrir</button>` : ''}
+      </span></div>`;
+  });
+  // achat
+  if (G.upgrades.grange > 0) {
+    h += `<div class="section-head" style="margin-top:8px">🛒 Acheter un animal</div>`;
+    const lvl = repLevel();
+    for (const [id, def] of Object.entries(ANIMALS)) {
+      if (def.repLvl > lvl) {
+        h += `<div class="row locked"><span class="ic">🔒</span><span class="grow"><span class="name">${def.name}</span><div class="sub">Réputation « ${REP_LEVELS[def.repLvl].name} » requise</div></span></div>`;
+        continue;
+      }
+      const canBuy = G.money >= def.price && G.animals.length < animalCap();
+      h += `<div class="row"><span class="ic">${def.icon}</span>
+        <span class="grow"><span class="name">${def.name}</span>
+        <div class="sub">${ITEMS[def.product].icon} ${ITEMS[def.product].name} toutes les ${def.prodMin} min (~${ITEMS[def.product].sell}/u)</div></span>
+        <span class="actions"><button data-act="buy-animal" data-type="${id}" ${canBuy ? '' : 'disabled'}>🪙 ${def.price}</button></span></div>`;
+    }
+    h += `<div class="row"><span class="ic">💡</span><span class="grow sub">Nourrir coûte 1 blé, 1 foin ou 5 pièces par jour. Un animal heureux produit plus vite !</span></div>`;
+  }
+  return h;
+}
+
+// --- Production (liste des bâtiments) ---
+function panelProduction() {
+  let h = panelHead('🏭 Production');
+  const lvl = repLevel();
+  for (const [bid, def] of Object.entries(BUILDINGS)) {
+    const b = G.buildings[bid];
+    if (b) {
+      const outCount = Object.values(b.output).reduce((x, y) => x + y, 0);
+      let sub = 'Inactif — cliquez pour lancer une recette';
+      if (b.recipeId) {
+        const recipe = def.recipes.find(r => r.id === b.recipeId);
+        sub = `Fabrique ${ITEMS[recipe.out].name} (${b.remaining} lot(s) restant(s))`;
+      }
+      h += `<div class="row" data-act="open-bldg" data-bldg="${bid}" style="cursor:pointer"><span class="ic">${def.icon}</span>
+        <span class="grow"><span class="name">${def.name}</span><div class="sub">${sub}</div></span>
+        <span class="actions">${outCount > 0 ? `<button data-act="collect-bldg" data-bldg="${bid}">📦 ${outCount}</button>` : '<span class="sub">›</span>'}</span></div>`;
+    } else if (def.repLvl <= lvl) {
+      const recipesTxt = def.recipes.map(r => `${ITEMS[r.out].icon} ${ITEMS[r.out].name}`).join(', ');
+      h += `<div class="row"><span class="ic">${def.icon}</span>
+        <span class="grow"><span class="name">${def.name}</span><div class="sub">Produit : ${recipesTxt}</div></span>
+        <span class="actions"><button data-act="buy-bldg" data-bldg="${bid}" ${G.money >= def.price ? '' : 'disabled'}>🪙 ${def.price}</button></span></div>`;
+    } else {
+      h += `<div class="row locked"><span class="ic">🔒</span>
+        <span class="grow"><span class="name">${def.name}</span><div class="sub">Réputation « ${REP_LEVELS[def.repLvl].name} » requise</div></span></div>`;
+    }
+  }
+  h += `<div class="row"><span class="ic">💡</span><span class="grow sub">Transformez vos récoltes pour les vendre bien plus cher : blé → farine → pain 🍞</span></div>`;
+  return h;
+}
+
+// --- Détail d'un bâtiment : choisir une recette ---
+function panelBuilding(ctx) {
+  const bid = ctx.bid;
+  const def = BUILDINGS[bid];
+  const b = G.buildings[bid];
+  if (!b) return panelProduction();
+  let h = panelHead(`${def.icon} ${def.name}`);
+  const outCount = Object.values(b.output).reduce((x, y) => x + y, 0);
+  if (outCount > 0) {
+    const items = Object.entries(b.output).map(([k, v]) => `${ITEMS[k].icon} ×${v}`).join(' ');
+    h += `<div class="row"><span class="ic">📦</span><span class="grow"><span class="name">Prêt : ${items}</span></span>
+      <span class="actions"><button data-act="collect-bldg" data-bldg="${bid}">Ramasser</button></span></div>`;
+  }
+  if (b.recipeId && b.remaining > 0) {
+    const recipe = def.recipes.find(r => r.id === b.recipeId);
+    const dur = recipe.timeMin * MIN;
+    h += `<div class="row"><span class="ic">⏳</span><span class="grow"><span class="name">${ITEMS[recipe.out].name} en cours</span>
+      <div class="sub">${fmtTime(b.startedAt + dur - Date.now())} · ${b.remaining} lot(s) restant(s)</div></span></div>`;
+  } else {
+    for (const r of def.recipes) {
+      const inTxt = Object.entries(r.in).map(([k, v]) => `${v} ${ITEMS[k].icon}`).join(' + ');
+      const can1 = Object.entries(r.in).every(([k, v]) => (G.inventory[k] || 0) >= v);
+      const can5 = Object.entries(r.in).every(([k, v]) => (G.inventory[k] || 0) >= v * 5);
+      h += `<div class="row"><span class="ic">${ITEMS[r.out].icon}</span>
+        <span class="grow"><span class="name">${ITEMS[r.out].name}</span>
+        <div class="sub">${inTxt} → 1 ${ITEMS[r.out].icon} · ${r.timeMin} min · vente ~${ITEMS[r.out].sell}</div></span>
+        <span class="actions">
+          <button data-act="start-recipe" data-bldg="${bid}" data-recipe="${r.id}" data-n="1" ${can1 ? '' : 'disabled'}>×1</button>
+          <button data-act="start-recipe" data-bldg="${bid}" data-recipe="${r.id}" data-n="5" ${can5 ? '' : 'disabled'}>×5</button>
+        </span></div>`;
+    }
+  }
+  return h;
+}
+
+// --- Marché ---
+function panelMarket() {
+  let h = panelHead(`🛒 Marché <span class="sub" style="font-weight:400">— stock ${invCount()}/${invCap()}</span>`);
+  if (G.merchant && G.merchant.until > Date.now()) {
+    h += `<div class="row" style="border:1px solid var(--gold)"><span class="ic">🧳</span>
+      <span class="grow"><span class="name">Marchand ambulant !</span>
+      <div class="sub">Achète ${ITEMS[G.merchant.itemId].icon} ${ITEMS[G.merchant.itemId].name} à +60 % (${fmtTime(G.merchant.until - Date.now())})</div></span></div>`;
+  }
+  const entries = Object.entries(G.inventory).filter(([, q]) => q > 0);
+  if (entries.length === 0) {
+    h += `<div class="row"><span class="grow sub">Inventaire vide. Récoltez d'abord quelque chose !</span></div>`;
+  } else {
+    h += `<div class="section-head">Vendre <span class="spacer"></span><button data-act="sell-everything">💰 Tout vendre</button></div>`;
+    for (const [itemId, qty] of entries) {
+      const p = sellPrice(itemId);
+      const base = ITEMS[itemId].sell;
+      const trend = p > base * 1.05 ? '<span class="up">▲</span>' : (p < base * 0.95 ? '<span class="down">▼</span>' : '');
+      h += `<div class="row"><span class="ic">${ITEMS[itemId].icon}</span>
+        <span class="grow"><span class="name">${ITEMS[itemId].name} ×${qty}</span>
+        <div class="sub"><span class="price">${p}</span>/u ${trend} (cours du jour)</div></span>
+        <span class="actions">
+          <button data-act="sell" data-item="${itemId}" data-n="1">1</button>
+          ${qty >= 10 ? `<button data-act="sell" data-item="${itemId}" data-n="10">10</button>` : ''}
+          <button data-act="sell" data-item="${itemId}" data-n="${qty}">Tout</button>
+        </span></div>`;
+    }
+  }
+  h += `<div class="section-head" style="margin-top:8px">Acheter</div>
+    <div class="row"><span class="ic">🌿</span><span class="grow"><span class="name">Foin</span>
+    <div class="sub">Nourriture pour animaux — ${HAY_PRICE}/u</div></span>
+    <span class="actions">
+      <button data-act="buy-hay" data-n="5" ${G.money >= HAY_PRICE * 5 ? '' : 'disabled'}>×5 (${HAY_PRICE * 5})</button>
+      <button data-act="buy-hay" data-n="20" ${G.money >= HAY_PRICE * 20 ? '' : 'disabled'}>×20 (${HAY_PRICE * 20})</button>
+    </span></div>`;
+  return h;
+}
+
+// --- Quêtes ---
+function panelQuests() {
+  let h = panelHead('📜 Commandes du village');
+  if (G.quests.length === 0) {
+    h += `<div class="row"><span class="grow sub">Aucune commande pour l'instant. Les villageois passent de nouvelles commandes chaque jour (10 min).</span></div>`;
+  }
+  for (const q of G.quests) {
+    const have = G.inventory[q.itemId] || 0;
+    const can = have >= q.qty;
+    const daysLeft = q.expiresDay - G.day;
+    h += `<div class="row"><span class="ic">${q.villager.icon}</span>
+      <span class="grow"><span class="name">${q.villager.name} ${q.villager.title}</span>
+      <div class="sub">${q.qty} × ${ITEMS[q.itemId].icon} ${ITEMS[q.itemId].name} (vous : ${have}) · expire dans ${daysLeft} j</div>
+      <div class="sub">Récompense : <span class="price">${q.rewardMoney} 💰</span> + ${q.rewardRep} ⭐</div></span>
+      <span class="actions">
+        <button data-act="quest-done" data-qid="${q.id}" ${can ? '' : 'disabled'}>✅</button>
+        <button data-act="quest-decline" data-qid="${q.id}" title="Refuser">✕</button>
+      </span></div>`;
+  }
+  h += `<div class="row"><span class="ic">⭐</span><span class="grow sub">Réputation : ${G.rep} pts (${REP_LEVELS[repLevel()].name}). Livrez des commandes pour débloquer cultures, animaux et bâtiments !</span></div>`;
+  return h;
+}
+
+// --- Améliorations ---
+function panelUpgrades() {
+  let h = panelHead('⬆️ Améliorations');
+  for (const [uid, def] of Object.entries(UPGRADES)) {
+    const cur = G.upgrades[uid];
+    const maxed = cur >= def.levels.length - 1;
+    h += `<div class="row"><span class="ic">${def.icon}</span>
+      <span class="grow"><span class="name">${def.name} <span class="tag">niv. ${cur + 1}</span></span>
+      <div class="sub">${def.levels[cur].desc}${maxed ? '' : ' → ' + def.levels[cur + 1].desc}</div></span>
+      <span class="actions">${maxed ? '<span class="tag">MAX</span>'
+        : `<button data-act="upgrade" data-up="${uid}" ${G.money >= def.levels[cur + 1].cost ? '' : 'disabled'}>🪙 ${def.levels[cur + 1].cost}</button>`}</span></div>`;
+  }
+  if (G.plots.length < PLOT_MAX) {
+    h += `<div class="row"><span class="ic">🟫</span>
+      <span class="grow"><span class="name">Parcelle supplémentaire</span>
+      <div class="sub">${G.plots.length}/${PLOT_MAX} parcelles</div></span>
+      <span class="actions"><button data-act="buy-plot" ${G.money >= plotPrice(G.plots.length) ? '' : 'disabled'}>🪙 ${plotPrice(G.plots.length)}</button></span></div>`;
+  }
+  h += `<div class="row"><span class="ic">📊</span><span class="grow sub">Statistiques : ${G.stats.harvested} récoltes · ${G.stats.sold} ventes · ${G.stats.earned} 💰 gagnés · ${G.stats.questsDone} commandes livrées · jour ${G.day + 1}</span></div>`;
+  return h;
+}
+
+// --- Réglages ---
+function panelSettings() {
+  const s = G.settings;
+  let h = panelHead('⚙️ Réglages');
+  h += `
+  <div class="setting-row"><span class="grow">📌 Toujours au-dessus</span>
+    <button data-act="set-pin">${s.alwaysOnTop ? 'ON ✅' : 'OFF'}</button></div>
+  <div class="setting-row"><span class="grow">👻 Opacité de la fenêtre</span>
+    <input type="range" min="50" max="100" step="10" value="${Math.round(s.opacity * 100)}" data-set="opacity">
+    <span>${Math.round(s.opacity * 100)}%</span></div>
+  <div class="setting-row"><span class="grow">📏 Taille de la fenêtre</span>
+    <span class="actions">
+      <button data-act="set-size" data-w="440" data-h="300">Mini</button>
+      <button data-act="set-size" data-w="600" data-h="400">Normal</button>
+      <button data-act="set-size" data-w="820" data-h="560">Grand</button>
+    </span></div>
+  <div class="setting-row"><span class="grow">🤏 Mode compact (interface réduite)</span>
+    <button data-act="set-compact">${s.compact ? 'ON ✅' : 'OFF'}</button></div>
+  <div class="setting-row"><span class="grow">🔔 Notifications Windows</span>
+    <button data-act="set-notifs">${s.systemNotifs ? 'ON ✅' : 'OFF'}</button></div>
+  <div class="setting-row"><span class="grow">🔊 Sons</span>
+    <button data-act="set-sound">${s.sound ? 'ON ✅' : 'OFF'}</button>
+    <input type="range" min="0" max="100" step="10" value="${Math.round((s.volume ?? 0.5) * 100)}" data-set="volume"></div>
+  <div class="setting-row"><span class="grow">💾 Sauvegarde</span>
+    <span class="actions">
+      <button data-act="save-export">Exporter</button>
+      <button data-act="save-import">Importer</button>
+    </span></div>
+  <div class="setting-row"><span class="grow">🗑️ Recommencer une nouvelle partie</span>
+    <button data-act="save-reset" style="color:var(--danger)">Réinitialiser</button></div>
+  <div class="setting-row sub">La partie est sauvegardée automatiquement. Le temps continue même fenêtre fermée.</div>`;
+  return h;
+}
+
+// ------------------------------------------------------------
+// Événements
+// ------------------------------------------------------------
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-act], [data-plot], [data-animal], [data-bldg], [data-tab]');
+  if (!t) return;
+  const act = t.dataset.act;
+
+  // Onglets
+  if (t.dataset.tab) {
+    const tab = t.dataset.tab;
+    el.tabbar.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === t));
+    if (tab === 'ferme') closePanel();
+    else showPanel(tab);
+    return;
+  }
+
+  // Actions génériques
+  switch (act) {
+    case 'close-panel': closePanel(); return;
+    case 'harvest-all': harvestAll(); return;
+    case 'water-all': waterPlot(0); return;
+    case 'buy-plot': buyPlot(); return;
+    case 'plant': plantCrop(+t.dataset.plot, t.dataset.crop); closePanel(); return;
+    case 'feed-animals': feedAllAnimals(); return;
+    case 'collect-animals': collectAllAnimals(); return;
+    case 'feed-animal': feedAnimal(+t.dataset.idx); return;
+    case 'collect-animal': collectAnimal(+t.dataset.idx); return;
+    case 'buy-animal': buyAnimal(t.dataset.type); return;
+    case 'buy-bldg': buyBuilding(t.dataset.bldg); return;
+    case 'open-bldg': showPanel('bldg', { bid: t.dataset.bldg }); return;
+    case 'collect-bldg': collectBuilding(t.dataset.bldg); e.stopPropagation(); return;
+    case 'start-recipe': startRecipe(t.dataset.bldg, t.dataset.recipe, +t.dataset.n); return;
+    case 'sell': sellItem(t.dataset.item, +t.dataset.n); return;
+    case 'sell-everything': sellAll(); return;
+    case 'buy-hay': buyHay(+t.dataset.n); return;
+    case 'quest-done': {
+      const q = G.quests.find(x => String(x.id) === t.dataset.qid); if (q) completeQuest(q.id);
+    } return;
+    case 'quest-decline': {
+      const q = G.quests.find(x => String(x.id) === t.dataset.qid); if (q) declineQuest(q.id);
+    } return;
+    case 'upgrade': buyUpgrade(t.dataset.up); return;
+    // Réglages
+    case 'set-pin': toggleSetting('alwaysOnTop'); return;
+    case 'set-compact': toggleSetting('compact'); return;
+    case 'set-notifs': toggleSetting('systemNotifs'); return;
+    case 'set-sound': toggleSetting('sound'); return;
+    case 'set-size': if (window.overlay) window.overlay.setSize(+t.dataset.w, +t.dataset.h); return;
+    case 'save-export': doExport(); return;
+    case 'save-import': doImport(); return;
+    case 'save-reset': if (confirm('Vraiment tout recommencer ? Votre ferme sera perdue.')) resetGame(); return;
+  }
+
+  // Clic sur une parcelle
+  if (t.dataset.plot !== undefined) {
+    const i = +t.dataset.plot;
+    const plot = G.plots[i];
+    if (!plot.crop) showPanel('seeds', { plotIdx: i });
+    else if (plotReady(plot)) harvestPlot(i);
+    else waterPlot(i);
+    return;
+  }
+  // Clic sur un animal
+  if (t.dataset.animal !== undefined) {
+    const i = +t.dataset.animal;
+    const a = G.animals[i];
+    if (a.stock > 0) collectAnimal(i);
+    else if (a.fedUntil < Date.now()) feedAnimal(i);
+    else showPanel('animaux');
+    return;
+  }
+  // Clic sur un bâtiment (bandeau ferme)
+  if (t.dataset.bldg !== undefined) {
+    const b = G.buildings[t.dataset.bldg];
+    if (b && Object.values(b.output).some(v => v > 0)) collectBuilding(t.dataset.bldg);
+    else showPanel('bldg', { bid: t.dataset.bldg });
+    return;
+  }
+});
+
+// Sliders (opacité, volume)
+document.addEventListener('input', (e) => {
+  const set = e.target.dataset && e.target.dataset.set;
+  if (set === 'opacity') {
+    G.settings.opacity = (+e.target.value) / 100;
+    if (window.overlay) window.overlay.setOpacity(G.settings.opacity);
+    const label = e.target.nextElementSibling;
+    if (label) label.textContent = `${e.target.value}%`;
+    save();
+  } else if (set === 'volume') {
+    G.settings.volume = (+e.target.value) / 100;
+    playSound('notif');
+    save();
+  }
+});
+
+function toggleSetting(key) {
+  G.settings[key] = !G.settings[key];
+  if (key === 'alwaysOnTop' && window.overlay) window.overlay.setAlwaysOnTop(G.settings.alwaysOnTop);
+  if (key === 'compact') document.body.classList.toggle('compact', G.settings.compact);
+  save();
+  htmlCache.panel = null;
+  render();
+}
+
+function doExport() {
+  const data = exportSave();
+  navigator.clipboard.writeText(data).then(
+    () => toast('💾 Sauvegarde copiée dans le presse-papier !'),
+    () => prompt('Copiez cette sauvegarde :', data)
+  );
+}
+function doImport() {
+  const data = prompt('Collez votre sauvegarde ici :');
+  if (!data) return;
+  try { importSave(data); toast('💾 Sauvegarde importée !'); }
+  catch { toast('❌ Sauvegarde invalide.'); }
+}
+
+// Boutons fenêtre
+el.pin.addEventListener('click', () => toggleSetting('alwaysOnTop'));
+$('#btn-min').addEventListener('click', () => window.overlay && window.overlay.minimize());
+$('#btn-close').addEventListener('click', () => window.overlay ? window.overlay.close() : window.close());
+
+// ------------------------------------------------------------
+// Démarrage
+// ------------------------------------------------------------
+initGame();
+document.body.classList.toggle('compact', G.settings.compact);
+if (window.overlay) {
+  window.overlay.setAlwaysOnTop(G.settings.alwaysOnTop);
+  window.overlay.setOpacity(G.settings.opacity);
+}
+onChange(render);
+render();
+
+
+// --- Adaptations web/mobile (aucun overlay Electron ici) ---
+if (!window.overlay) {
+  document.body.classList.add('mobile');
+
+  panelSettings = function () {
+    const s = G.settings;
+    let h = panelHead('⚙️ Réglages');
+    h += `
+    <div class="setting-row"><span class="grow">🤏 Mode compact (interface réduite)</span>
+      <button data-act="set-compact">${s.compact ? 'ON ✅' : 'OFF'}</button></div>
+    <div class="setting-row"><span class="grow">🔊 Sons</span>
+      <button data-act="set-sound">${s.sound ? 'ON ✅' : 'OFF'}</button>
+      <input type="range" min="0" max="100" step="10" value="${Math.round((s.volume ?? 0.5) * 100)}" data-set="volume"></div>
+    <div class="setting-row"><span class="grow">💾 Sauvegarde (copier/coller pour transférer entre appareils)</span>
+      <span class="actions">
+        <button data-act="save-export">Exporter</button>
+        <button data-act="save-import">Importer</button>
+      </span></div>
+    <div class="setting-row"><span class="grow">🗑️ Recommencer une nouvelle partie</span>
+      <button data-act="save-reset" style="color:var(--danger)">Réinitialiser</button></div>
+    <div class="setting-row sub">Sauvegarde automatique sur cet appareil. Le temps continue même application fermée. Astuce : « Exporter » sur PC puis « Importer » ici pour transférer votre ferme.</div>`;
+    return h;
+  };
+
+  function showSaveModal(mode) {
+    const wrap = document.createElement('div');
+    wrap.className = 'save-modal';
+    const isExport = mode === 'export';
+    wrap.innerHTML = `<div class="box">
+      <b>${isExport ? '💾 Exporter la sauvegarde' : '💾 Importer une sauvegarde'}</b>
+      <span class="sub">${isExport ? 'Copiez ce texte et collez-le dans « Importer » sur un autre appareil.' : 'Collez ici le texte obtenu via « Exporter » sur votre autre appareil.'}</span>
+      <textarea ${isExport ? 'readonly' : ''}></textarea>
+      <div class="btns">
+        ${isExport ? '<button data-m="copy">📋 Copier</button>' : '<button data-m="load">✅ Importer</button>'}
+        <button data-m="close">Fermer</button>
+      </div></div>`;
+    const ta = wrap.querySelector('textarea');
+    if (isExport) { ta.value = exportSave(); }
+    wrap.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-m]');
+      if (!b) { if (e.target === wrap) wrap.remove(); return; }
+      if (b.dataset.m === 'close') wrap.remove();
+      if (b.dataset.m === 'copy') {
+        ta.select(); ta.setSelectionRange(0, 999999);
+        try { document.execCommand('copy'); b.textContent = '✅ Copié !'; } catch (err) { /* sélection manuelle */ }
+        if (navigator.clipboard) navigator.clipboard.writeText(ta.value).catch(() => {});
+      }
+      if (b.dataset.m === 'load') {
+        try { importSave(ta.value.trim()); toast('💾 Sauvegarde importée !'); wrap.remove(); closePanel(); }
+        catch (err) { toast('❌ Sauvegarde invalide.'); }
+      }
+    });
+    document.querySelector('#farm-view').appendChild(wrap);
+    if (isExport) { ta.focus(); ta.select(); }
+  }
+
+  document.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-act]');
+    if (!t) return;
+    const act = t.dataset.act;
+    if (act !== 'save-export' && act !== 'save-import' && act !== 'save-reset') return;
+    e.stopPropagation(); e.preventDefault();
+    if (act === 'save-export') showSaveModal('export');
+    else if (act === 'save-import') showSaveModal('import');
+    else if (act === 'save-reset') {
+      if (t.dataset.armed) { resetGame(); closePanel(); }
+      else {
+        t.dataset.armed = '1'; t.textContent = '⚠️ Sûr ? Retouchez';
+        setTimeout(() => { if (openPanel) { htmlCache.panel = null; render(); } }, 4000);
+      }
+    }
+  }, true);
+
+  // PWA : service worker pour l'installation et le mode hors-ligne
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    navigator.serviceWorker.register('./sw.js').catch(() => { /* hors-ligne indisponible */ });
+  }
+}
+
+</script>
+</body>
+</html>
