@@ -14,7 +14,6 @@
   <meta name="apple-mobile-web-app-title" content="Petite Ferme">
   <script src="https://www.gstatic.com/firebasejs/12.4.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/12.4.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore-compat.js"></script>
   <style>
 /* ============================================================
    Petite Ferme — style compact pour fenêtre overlay
@@ -1792,19 +1791,39 @@ if (!window.overlay) {
   let lastSyncAt = 0;
   let cloudBusy = false;
 
-  const fbOk = () => FIREBASE_CONFIG && window.firebase && firebase.apps;
+  // --- Accès Firestore via l'API REST (pas de SDK Firestore) ---
+  const FS_URL = FIREBASE_CONFIG
+    ? 'https://firestore.googleapis.com/v1/projects/' + FIREBASE_CONFIG.projectId + '/databases/(default)/documents/saves/'
+    : '';
 
-  function cloudDoc() { return firebase.firestore().doc('saves/' + fbUser.uid); }
+  async function fsRequest(method, body) {
+    const token = await fbUser.getIdToken();
+    const res = await fetch(FS_URL + fbUser.uid, {
+      method,
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    if (res.status === 404) return null;           // pas encore de sauvegarde
+    if (!res.ok) throw new Error('firestore ' + res.status);
+    return method === 'DELETE' ? null : res.json();
+  }
+
+  function fsNumber(field) {
+    if (!field) return 0;
+    return Number(field.doubleValue ?? field.integerValue ?? 0);
+  }
 
   async function cloudUpload() {
     if (!fbUser || cloudBusy) return;
     cloudBusy = true;
     try {
-      await cloudDoc().set({
-        json: exportSave(),
-        lastTick: G.lastTick,
-        updatedAt: Date.now(),
-        pseudo: fbUser.email.split('@')[0]
+      await fsRequest('PATCH', {
+        fields: {
+          json: { stringValue: exportSave() },
+          lastTick: { doubleValue: G.lastTick },
+          updatedAt: { doubleValue: Date.now() },
+          pseudo: { stringValue: fbUser.email.split('@')[0] }
+        }
       });
       lastSyncAt = Date.now();
     } catch (e) { /* hors-ligne : re-tentera au prochain cycle */ }
@@ -1816,12 +1835,13 @@ if (!window.overlay) {
   async function cloudRestore(explicitLogin) {
     if (!fbUser) return;
     try {
-      const snap = await cloudDoc().get();
-      if (snap.exists) {
-        const cloud = snap.data();
+      const doc = await fsRequest('GET');
+      if (doc && doc.fields && doc.fields.json) {
+        const cloudJson = doc.fields.json.stringValue;
+        const cloudTick = fsNumber(doc.fields.lastTick);
         const localFresh = G.stats.earned === 0 && G.stats.harvested === 0 && G.day === 0;
-        if (explicitLogin || localFresh || (cloud.lastTick || 0) > G.lastTick) {
-          importSave(cloud.json);
+        if (explicitLogin || localFresh || cloudTick > G.lastTick) {
+          importSave(cloudJson);
           toast('☁️ Ferme du compte chargée !');
         } else {
           await cloudUpload();

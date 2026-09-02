@@ -1,5 +1,5 @@
 // Service worker — installation PWA + mode hors-ligne
-const CACHE = 'ferme-1788339848353';
+const CACHE = 'ferme-1788340236663';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
