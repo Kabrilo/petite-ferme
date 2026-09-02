@@ -1828,9 +1828,16 @@ if (!window.overlay) {
     ]);
   }
   let lastSig = null;
+  let cloudScoreKnown = -1;   // progression connue du compte : garde-fou anti-ecrasement
 
-  async function cloudUpload(force) {
+  async function cloudUpload(force, allowRegression) {
     if (!fbUser) return;
+    // Ne JAMAIS remplacer silencieusement la ferme du compte par une ferme
+    // moins avancee (score toujours croissant en jeu normal).
+    if (!allowRegression && cloudScoreKnown >= 0 && progressScore(G) < cloudScoreKnown) {
+      toast('⚠️ Ferme du compte plus avancee : envoi bloque pour ne rien ecraser.');
+      return;
+    }
     if (!force) {
       const sig = farmSignature();
       if (sig === lastSig) return;   // rien de neuf : aucune écriture
@@ -1850,28 +1857,109 @@ if (!window.overlay) {
         }
       });
       lastSyncAt = Date.now();
+      cloudScoreKnown = progressScore(G);
     } catch (e) { /* hors-ligne : re-tentera au prochain cycle */ }
     cloudBusy = false;
     // forcée : la signature a déjà été enregistrée, il faut vraiment envoyer
-    if (cloudDirty) { cloudDirty = false; await cloudUpload(true); }
+    if (cloudDirty) { cloudDirty = false; await cloudUpload(true, allowRegression); }
   }
 
-  // explicitLogin=true : le cloud gagne (c'est « ma ferme de compte »).
-  // Au démarrage (session restaurée) : on garde la plus récente des deux.
+  // --- Comparaison de progression ---
+  // On ne compare JAMAIS des horodatages : lastTick vaut « maintenant » sur
+  // chaque appareil au démarrage, l'appareil ouvert semblerait toujours le plus
+  // récent et écraserait l'autre. On mesure la progression réelle.
+  function progressScore(g) {
+    if (!g) return -1;
+    const st = g.stats || {};
+    const up = Object.values(g.upgrades || {}).reduce((a, b) => a + b, 0);
+    return (st.earned || 0)
+      + (st.harvested || 0) * 10
+      + (g.day || 0) * 50
+      + (g.rep || 0) * 5
+      + Math.max(0, (g.plots || []).length - 6) * 200
+      + up * 400
+      + Object.keys(g.buildings || {}).length * 600
+      + (g.animals || []).length * 300;
+  }
+
+  function describeFarm(g) {
+    return '💰 ' + Math.round(g.money || 0) + ' · Jour ' + ((g.day || 0) + 1)
+      + ' · ⭐ ' + (g.rep || 0) + ' · 🟫 ' + ((g.plots || []).length)
+      + ' · 🐄 ' + ((g.animals || []).length)
+      + ' · 🏭 ' + Object.keys(g.buildings || {}).length;
+  }
+
+  // Filet de sécurité : toute ferme sur le point d'être remplacée est conservée
+  // localement et récupérable depuis les Réglages.
+  function backupSave(json, reason) {
+    try {
+      localStorage.setItem('petite-ferme-backup', JSON.stringify({ when: Date.now(), reason, json }));
+    } catch (e) { /* stockage indisponible */ }
+  }
+  function getBackup() {
+    try { return JSON.parse(localStorage.getItem('petite-ferme-backup')); } catch (e) { return null; }
+  }
+
+  // Conflit : les deux fermes ont progressé chacune de leur côté. On ne tranche
+  // pas à la place du joueur.
+  function askFarmConflict(cloudJson) {
+    let cloudG = null;
+    try { cloudG = JSON.parse(cloudJson); } catch (e) { return; }
+    const wrap = document.createElement('div');
+    wrap.className = 'save-modal';
+    wrap.innerHTML = `<div class="box">
+      <b>⚠️ Deux fermes différentes</b>
+      <span class="sub">Votre compte et cet appareil ont chacun une ferme. Laquelle gardez-vous ? L'autre reste récupérable dans les Réglages.</span>
+      <div class="account-box"><b>☁️ Ferme du compte</b><span class="sub">${describeFarm(cloudG)}</span>
+        <button data-m="cloud">Garder celle-ci</button></div>
+      <div class="account-box"><b>📱 Ferme de cet appareil</b><span class="sub">${describeFarm(G)}</span>
+        <button data-m="local">Garder celle-ci</button></div>
+    </div>`;
+    wrap.addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-m]');
+      if (!b) return;
+      if (b.dataset.m === 'cloud') {
+        backupSave(exportSave(), 'ferme de cet appareil, remplacée par celle du compte');
+        importSave(cloudJson);
+        lastSig = farmSignature();
+        toast('☁️ Ferme du compte chargée.');
+      } else {
+        backupSave(cloudJson, 'ferme du compte, remplacée par celle de cet appareil');
+        await cloudUpload(true, true);
+        toast('📱 Ferme de cet appareil conservée et envoyée sur le compte.');
+      }
+      wrap.remove();
+      if (openPanel) { htmlCache.panel = null; render(); }
+    });
+    document.querySelector('#farm-view').appendChild(wrap);
+  }
+
+  // Règle : la ferme la PLUS AVANCÉE gagne. Si c'est celle de l'appareil alors
+  // que le joueur vient de se connecter, on lui demande avant de rien écraser.
   async function cloudRestore(explicitLogin) {
     if (!fbUser) return;
     try {
       const doc = await fsRequest('GET');
       if (doc && doc.fields && doc.fields.json) {
         const cloudJson = doc.fields.json.stringValue;
-        const cloudTick = fsNumber(doc.fields.lastTick);
+        let cloudG = null;
+        try { cloudG = JSON.parse(cloudJson); } catch (e) { cloudG = null; }
+        if (!cloudG) { await cloudUpload(true); lastSyncAt = Date.now(); return; }
+
+        const sCloud = progressScore(cloudG);
+        cloudScoreKnown = sCloud;
+        const sLocal = progressScore(G);
         const localFresh = G.stats.earned === 0 && G.stats.harvested === 0 && G.day === 0;
-        if (explicitLogin || localFresh || cloudTick > G.lastTick) {
+
+        if (localFresh || sCloud > sLocal) {
+          if (!localFresh) backupSave(exportSave(), 'ferme de cet appareil, remplacée par celle du compte');
           importSave(cloudJson);
-          lastSig = farmSignature();   // état identique au cloud : rien à renvoyer
+          lastSig = farmSignature();
           toast('☁️ Ferme du compte chargée !');
+        } else if (sLocal > sCloud && explicitLogin) {
+          askFarmConflict(cloudJson);      // le joueur tranche
         } else {
-          await cloudUpload(true);
+          await cloudUpload(true);         // même appareil qui continue de jouer
         }
       } else {
         await cloudUpload(true);
@@ -1974,6 +2062,8 @@ if (!window.overlay) {
         <button data-act="save-export">Exporter</button>
         <button data-act="save-import">Importer</button>
       </span></div>
+    ${(() => { const b = getBackup(); return b ? `<div class="setting-row"><span class="grow">↩️ Sauvegarde de secours<div class="sub">${new Date(b.when).toLocaleString('fr-FR')} — ${b.reason}</div></span>
+      <button data-act="restore-backup">Restaurer</button></div>` : ''; })()}
     <div class="setting-row"><span class="grow">🗑️ Recommencer une nouvelle partie</span>
       <button data-act="save-reset" style="color:var(--danger)">Réinitialiser</button></div>
     <div class="setting-row sub">Sauvegarde automatique sur cet appareil${fbUser ? ' + sur votre compte ☁️' : ''}. Le temps continue même application fermée.</div>`;
@@ -2004,7 +2094,7 @@ if (!window.overlay) {
         if (navigator.clipboard) navigator.clipboard.writeText(ta.value).catch(() => {});
       }
       if (b.dataset.m === 'load') {
-        try { importSave(ta.value.trim()); toast('💾 Sauvegarde importée !'); wrap.remove(); closePanel(); }
+        try { backupSave(exportSave(), 'ferme avant import manuel'); importSave(ta.value.trim()); cloudUpload(true, true); toast('💾 Sauvegarde importée !'); wrap.remove(); closePanel(); }
         catch (err) { toast('❌ Sauvegarde invalide.'); }
       }
     });
@@ -2016,15 +2106,30 @@ if (!window.overlay) {
     const t = e.target.closest('[data-act]');
     if (!t) return;
     const act = t.dataset.act;
-    const handled = ['save-export', 'save-import', 'save-reset', 'acc-signup', 'acc-login', 'acc-logout', 'acc-sync'];
+    const handled = ['save-export', 'save-import', 'save-reset', 'acc-signup', 'acc-login', 'acc-logout', 'acc-sync', 'restore-backup'];
     if (!handled.includes(act)) return;
     e.stopPropagation(); e.preventDefault();
     if (act === 'save-export') showSaveModal('export');
     else if (act === 'save-import') showSaveModal('import');
     else if (act === 'save-reset') {
-      if (t.dataset.armed) { resetGame(); closePanel(); }
+      if (t.dataset.armed) { backupSave(exportSave(), 'ferme avant réinitialisation'); resetGame(); cloudUpload(true, true); closePanel(); }
       else {
         t.dataset.armed = '1'; t.textContent = '⚠️ Sûr ? Retouchez';
+        setTimeout(() => { if (openPanel) { htmlCache.panel = null; render(); } }, 4000);
+      }
+    }
+    else if (act === 'restore-backup') {
+      const b = getBackup();
+      if (!b) return;
+      if (t.dataset.armed) {
+        backupSave(exportSave(), 'ferme remplacée par la sauvegarde de secours');
+        importSave(b.json);
+        lastSig = null;
+        cloudUpload(true, true);
+        toast('↩️ Sauvegarde de secours restaurée.');
+        closePanel();
+      } else {
+        t.dataset.armed = '1'; t.textContent = '⚠️ Confirmer';
         setTimeout(() => { if (openPanel) { htmlCache.panel = null; render(); } }, 4000);
       }
     }
