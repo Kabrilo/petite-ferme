@@ -1814,8 +1814,28 @@ if (!window.overlay) {
     return Number(field.doubleValue ?? field.integerValue ?? 0);
   }
 
-  async function cloudUpload() {
+  // Signature de l'état « visible » de la ferme : sert à n'envoyer une
+  // sauvegarde que lorsque quelque chose a vraiment changé. Une fenêtre
+  // laissée ouverte sans rien faire ne génère donc aucune écriture.
+  function farmSignature() {
+    return JSON.stringify([
+      G.money, G.rep, G.day, G.plots.length,
+      G.plots.map(p => (p.crop || '') + (plotReady(p) ? '!' : '')),
+      G.inventory,
+      G.animals.map(a => a.type + ':' + a.stock + ':' + (a.fedUntil > Date.now() ? 1 : 0)),
+      Object.entries(G.buildings).map(([k, b]) => k + ':' + b.remaining + ':' + JSON.stringify(b.output)),
+      G.upgrades, G.quests.length
+    ]);
+  }
+  let lastSig = null;
+
+  async function cloudUpload(force) {
     if (!fbUser) return;
+    if (!force) {
+      const sig = farmSignature();
+      if (sig === lastSig) return;   // rien de neuf : aucune écriture
+      lastSig = sig;
+    } else { lastSig = farmSignature(); }
     // Une synchro déjà en vol : on note qu'il faudra en refaire une avec
     // l'état le plus récent, sinon la dernière progression serait perdue.
     if (cloudBusy) { cloudDirty = true; return; }
@@ -1832,7 +1852,8 @@ if (!window.overlay) {
       lastSyncAt = Date.now();
     } catch (e) { /* hors-ligne : re-tentera au prochain cycle */ }
     cloudBusy = false;
-    if (cloudDirty) { cloudDirty = false; await cloudUpload(); }
+    // forcée : la signature a déjà été enregistrée, il faut vraiment envoyer
+    if (cloudDirty) { cloudDirty = false; await cloudUpload(true); }
   }
 
   // explicitLogin=true : le cloud gagne (c'est « ma ferme de compte »).
@@ -1847,12 +1868,13 @@ if (!window.overlay) {
         const localFresh = G.stats.earned === 0 && G.stats.harvested === 0 && G.day === 0;
         if (explicitLogin || localFresh || cloudTick > G.lastTick) {
           importSave(cloudJson);
+          lastSig = farmSignature();   // état identique au cloud : rien à renvoyer
           toast('☁️ Ferme du compte chargée !');
         } else {
-          await cloudUpload();
+          await cloudUpload(true);
         }
       } else {
-        await cloudUpload();
+        await cloudUpload(true);
         toast('☁️ Votre ferme est maintenant sauvegardée sur votre compte !');
       }
       lastSyncAt = Date.now();
@@ -1902,12 +1924,13 @@ if (!window.overlay) {
       firstAuth = false;
       if (openPanel && openPanel.type === 'reglages') { htmlCache.panel = null; render(); }
     });
-    // Synchro automatique : régulièrement + dès qu'on quitte ou masque la page
-    setInterval(() => { if (fbUser) cloudUpload(); }, 20000);
+    // Synchro automatique : contrôle toutes les 30 s, mais n'écrit que si la
+    // ferme a changé. Envoi garanti quand on quitte ou masque la page.
+    setInterval(() => { if (fbUser) cloudUpload(); }, 30000);
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden' && fbUser) cloudUpload();
+      if (document.visibilityState === 'hidden' && fbUser) cloudUpload(true);
     });
-    window.addEventListener('pagehide', () => { if (fbUser) cloudUpload(); });
+    window.addEventListener('pagehide', () => { if (fbUser) cloudUpload(true); });
   }
 
   function accountSection() {
@@ -2008,12 +2031,12 @@ if (!window.overlay) {
     else if (act === 'acc-signup') accountAction('signup');
     else if (act === 'acc-login') accountAction('login');
     else if (act === 'acc-logout') {
-      cloudUpload().finally(() => firebase.auth().signOut().then(() => {
+      cloudUpload(true).finally(() => firebase.auth().signOut().then(() => {
         toast('👋 Déconnecté. La ferme reste sauvegardée sur cet appareil et sur le compte.');
         if (openPanel) { htmlCache.panel = null; render(); }
       }));
     }
-    else if (act === 'acc-sync') { cloudUpload().then(() => { toast('☁️ Synchronisé !'); if (openPanel) { htmlCache.panel = null; render(); } }); }
+    else if (act === 'acc-sync') { cloudUpload(true).then(() => { toast('☁️ Synchronisé !'); if (openPanel) { htmlCache.panel = null; render(); } }); }
   }, true);
 
   // PWA : service worker pour l'installation et le mode hors-ligne
